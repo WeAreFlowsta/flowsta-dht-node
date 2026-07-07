@@ -102,8 +102,7 @@ Then:
 sudo certbot certonly --standalone -d node.example.com
 
 # Start the node WITH the bootstrap role
-TLS_CERT_DIR=/etc/letsencrypt/live/node.example.com \
-  docker compose --profile bootstrap up -d
+TLS_DOMAIN=node.example.com docker compose --profile bootstrap up -d
 ```
 
 Verify: `curl -s https://node.example.com/` should answer. Then tell
@@ -137,7 +136,7 @@ Create a `.env` file in the repo root:
 | `API_URL` | Yes | — | Flowsta API URL for auto-updates |
 | `CONDUCTOR_IMAGE` | No | public Flowsta image | Override the conductor image |
 | `UPDATE_INTERVAL` | No | `21600` (6 h) | Seconds between auto-update checks |
-| `TLS_CERT_DIR` | bootstrap role | — | Directory holding `fullchain.pem` / `privkey.pem` |
+| `TLS_DOMAIN` | bootstrap role | — | Domain whose Let's Encrypt cert to serve |
 | `NODE_SECRET` | No | — | Legacy; bundle downloads are open (sha256-verified) |
 
 **Networks:** the example config joins the **production** network —

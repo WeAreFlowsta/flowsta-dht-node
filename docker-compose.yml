@@ -62,14 +62,16 @@ services:
       - "--listen"
       - "[::]:443"
       - "--tls-cert"
-      - "/certs/fullchain.pem"
+      - "/etc/letsencrypt/live/${TLS_DOMAIN}/fullchain.pem"
       - "--tls-key"
-      - "/certs/privkey.pem"
+      - "/etc/letsencrypt/live/${TLS_DOMAIN}/privkey.pem"
       # No --authentication-hook-server: community bootstrap is OPEN by
       # design — it is the network's fallback when the gated primary is
       # unreachable. bootstrap-srv's built-in rate limiting applies.
     volumes:
-      - ${TLS_CERT_DIR:-/etc/letsencrypt/live/YOUR_DOMAIN}:/certs:ro
+      # Mount the whole letsencrypt tree: live/ contains symlinks into
+      # archive/, so mounting live/<domain> alone gives dangling links.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     logging:
       driver: json-file
       options:
