@@ -20,8 +20,8 @@ network:
   bootstrap_url: "https://bootstrap.flowsta.com"
   signal_url:    "wss://bootstrap.flowsta.com"
   relay_url:     "https://bootstrap.flowsta.com./"
-  base64_auth_material_bootstrap: "eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0"
-  base64_auth_material_relay: "eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0"
+  base64_auth_material_bootstrap: "eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0="
+  base64_auth_material_relay: "eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0="
   report: !json_lines
     days_retained: 30
     fetched_op_interval_s: 300
