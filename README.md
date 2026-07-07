@@ -84,7 +84,18 @@ discovery alive even if the primary is unreachable. Running one is the
 single most valuable thing a community operator can contribute.
 
 Extra requirements: a domain (or dynamic DNS) pointing at your node,
-port 443 reachable from the internet, and a TLS certificate:
+port 443 reachable from the internet, and a TLS certificate.
+
+**Check for CGNAT first** — before touching DNS or certificates:
+compare your router's WAN IP (its status page) with what the internet
+sees (`curl ifconfig.me`). If they differ — especially if the router
+shows an address starting with `100.64`–`100.127`, `10.`, or `172.` —
+your ISP has you behind carrier-grade NAT and **no port forwarding can
+work**. Ask your ISP for a public IP (many provide one on request,
+free or cheap), then continue. The basic node needs none of this —
+CGNAT only blocks the bootstrap role.
+
+Then:
 
 ```bash
 # One-time: get a certificate (stop anything on :80 first)
