@@ -1,0 +1,4 @@
+# Override .gitignore for Cloud Build — we need hApp files in the image
+.git
+node_modules
+conductor-config.yaml

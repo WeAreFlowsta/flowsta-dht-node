@@ -1,0 +1,13 @@
+{
+  "name": "flowsta-dht-updater",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@holochain/client": "0.20.2",
+    "libsodium-wrappers": "0.7.15"
+  },
+  "overrides": {
+    "libsodium-wrappers": "0.7.15"
+  }
+}

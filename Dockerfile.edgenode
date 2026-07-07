@@ -1,0 +1,38 @@
+# Flowsta edge node base image — Holochain 0.6.1 stable.
+#
+# Holo Host's published edge node image (v0.2.0-alpha1) bundles Holochain
+# 0.6.1-rc.3 — a March release candidate — and their main branch has not
+# been bumped to stable. Rather than run a stale rc, we take their image
+# as a base and overlay the conductor binary from the official
+# holochain-0.6.1 stable GitHub release (2026-05-12). Everything else in
+# the image — s6 supervision, config templating, log rotation — is Holo
+# Host's, unchanged.
+#
+# Build:  gcloud builds submit --config=cloudbuild-edgenode.yaml \
+#           --project=flowsta-475001
+# Output: gcr.io/flowsta-475001/flowsta-edgenode:hc0.6.1
+#
+# Consumed by: the Iowa API conductor directly, and Dockerfile.precompiled
+# (DHT nodes) via its FROM line.
+
+# Base pinned by digest = ghcr.io/holo-host/edgenode:v0.2.0-alpha1 (= :latest
+# as of 2026-05). Digest pin so the base can't drift under us.
+FROM ghcr.io/holo-host/edgenode@sha256:bd6336f1a2a4ce47b819123e1ef84353cfc7357df5e1832ea59aba8ab77904d3
+
+USER root
+
+# x86_64 only — every Flowsta conductor (fleet
+# and production) runs on an amd64 GCP VM.
+ARG HOLOCHAIN_VERSION=0.6.1
+ARG HC_ARCH=x86_64-unknown-linux-gnu
+
+# Overlay the stable conductor + hc CLI over the base image's rc.3 binaries.
+# The trailing `holochain --version` is a build-time sanity check — a wrong
+# arch or a truncated download fails the build loudly here.
+RUN wget -q "https://github.com/holochain/holochain/releases/download/holochain-${HOLOCHAIN_VERSION}/holochain-${HC_ARCH}" -O /bin/holochain \
+ && wget -q "https://github.com/holochain/holochain/releases/download/holochain-${HOLOCHAIN_VERSION}/hc-${HC_ARCH}" -O /bin/hc \
+ && chmod +x /bin/holochain /bin/hc \
+ && /bin/holochain --version
+
+LABEL org.flowsta.base="ghcr.io/holo-host/edgenode@sha256:bd6336f1a2a4ce47b819123e1ef84353cfc7357df5e1832ea59aba8ab77904d3" \
+      org.flowsta.holochain-version="0.6.1"

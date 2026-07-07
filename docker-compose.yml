@@ -1,0 +1,79 @@
+# Flowsta DHT Node
+#
+# Runs a Holochain conductor with auto-managed Flowsta DNAs.
+# Two containers:
+#   1. conductor — Flowsta's public Holochain 0.6.1/Iroh edge-node image
+#   2. sidecar   — DNA installer + auto-updater (Node.js)
+#   3. bootstrap-srv (optional, --profile bootstrap) — open
+#      bootstrap/signal/relay for network redundancy
+#
+# Usage:
+#   docker compose up -d
+#
+# The sidecar waits for the conductor to be ready, installs all
+# bundled DNA hApp files, then polls the API for updates every 6 hours.
+
+services:
+  conductor:
+    image: ${CONDUCTOR_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode:hc0.6.1}
+    container_name: flowsta-conductor
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - conductor-data:/data
+      - ./conductor-config.yaml:/usr/local/share/holochain/conductor-config.template.yaml:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  sidecar:
+    build: .
+    image: flowsta-dht-node:latest
+    container_name: flowsta-sidecar
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - conductor
+    environment:
+      - CONDUCTOR_URL=ws://localhost:4444
+      - API_URL=${API_URL}
+      - NODE_SECRET=${NODE_SECRET}
+      - UPDATE_INTERVAL=${UPDATE_INTERVAL:-21600}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: open bootstrap/signal/relay server for network redundancy.
+  # Requires a publicly reachable address + TLS certs (see README).
+  # Start with: docker compose --profile bootstrap up -d
+  bootstrap-srv:
+    image: ghcr.io/holochain/kitsune2_bootstrap_srv:v0.4.1
+    container_name: flowsta-bootstrap-srv
+    network_mode: host
+    restart: unless-stopped
+    profiles: ["bootstrap"]
+    command:
+      - "--production"
+      - "--listen"
+      - "[::]:443"
+      - "--tls-cert"
+      - "/certs/fullchain.pem"
+      - "--tls-key"
+      - "/certs/privkey.pem"
+      # No --authentication-hook-server: community bootstrap is OPEN by
+      # design — it is the network's fallback when the gated primary is
+      # unreachable. bootstrap-srv's built-in rate limiting applies.
+    volumes:
+      - ${TLS_CERT_DIR:-/etc/letsencrypt/live/YOUR_DOMAIN}:/certs:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+volumes:
+  conductor-data:

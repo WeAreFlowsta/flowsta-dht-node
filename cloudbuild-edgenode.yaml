@@ -1,0 +1,23 @@
+# Cloud Build — Flowsta edge node base image (Holochain 0.6.1 stable).
+#
+# Builds the binary-swap image defined in Dockerfile.edgenode: Holo Host's
+# edge node with the conductor binary overlaid from the holochain-0.6.1
+# stable release.
+#
+# Usage:
+#   gcloud builds submit --config=cloudbuild-edgenode.yaml --project=flowsta-475001
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'Dockerfile.edgenode'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/flowsta-edgenode:hc0.6.1'
+      - '.'
+
+images:
+  - 'gcr.io/$PROJECT_ID/flowsta-edgenode:hc0.6.1'
+
+timeout: '600s'

@@ -1,0 +1,36 @@
+# Flowsta DHT Node — conductor configuration (Holochain 0.6.1 / Iroh)
+#
+# Copy to conductor-config.yaml. Works as-is for a community node.
+# All three URLs point at the same server — it hosts peer discovery
+# (bootstrap), SBD signal, and the Iroh relay.
+#
+# The auth material below is the SHARED COMMUNITY CLIENT ID — it is
+# public by design (it identifies "a community node" to Flowsta's
+# rate-limiting/revocation, it is not a secret and grants nothing
+# beyond bootstrap access).
+
+admin_interfaces:
+- driver:
+    type: websocket
+    port: 4444
+    danger_bind_addr: null
+    allowed_origins: '*'
+
+network:
+  bootstrap_url: "https://bootstrap.flowsta.com"
+  signal_url:    "wss://bootstrap.flowsta.com"
+  relay_url:     "https://bootstrap.flowsta.com./"
+  base64_auth_material_bootstrap: "eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0"
+  base64_auth_material_relay: "eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0"
+  report: !json_lines
+    days_retained: 30
+    fetched_op_interval_s: 300
+
+data_root_path: "/data/holochain"
+
+keystore:
+  type: lair_server_in_proc
+  lair_root: "/data/holochain/ks"
+
+# info level keeps disk use sane on small community nodes.
+tracing_override: "info,kitsune2=info"

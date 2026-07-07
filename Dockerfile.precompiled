@@ -1,0 +1,26 @@
+# ⚠️ DEPRECATED (2026-07-07): this base image is Holochain 0.6.0 /
+# WebRTC — transport-incompatible with the current 0.6.1/Iroh network.
+# A node built from it boots but gossips with NOBODY. Use the public
+# prebuilt image instead (the docker-compose default):
+#   us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode:hc0.6.1
+# To build from source, see Dockerfile.edgenode + cloudbuild-edgenode.yaml.
+# Flowsta DHT Node — Pre-compiled Conductor
+#
+# This image contains a Holochain conductor with all Flowsta DNAs
+# pre-installed and WASM pre-compiled. No compilation happens on
+# the target device — it's ready to gossip immediately.
+#
+# Built by build-precompiled.sh (runs on Cloud Build with plenty of RAM).
+# The pre-compiled data is baked into the image at /data-precompiled/.
+# On first boot, the entrypoint copies it to /data/ if empty.
+
+FROM ghcr.io/holo-host/edgenode:v0.0.7ga.5-hc0.6.0-go-pion-dev
+
+# Copy the pre-compiled conductor data (WASM cache, databases, lair keystore)
+COPY precompiled-data.tar.gz /opt/flowsta/precompiled-data.tar.gz
+
+# Copy the first-boot entrypoint that unpacks data if /data is empty
+COPY entrypoint-precompiled.sh /opt/flowsta/entrypoint.sh
+RUN chmod +x /opt/flowsta/entrypoint.sh
+
+ENTRYPOINT ["/opt/flowsta/entrypoint.sh"]
