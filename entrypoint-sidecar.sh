@@ -42,7 +42,7 @@ echo "Installing bundled DNAs..."
 node /app/install-bundled-dnas.mjs || echo "WARNING: DNA install had errors (updater will retry)"
 
 # Auto-updater loop
-if [ -n "$API_URL" ] && [ -n "$NODE_SECRET" ]; then
+if [ -n "$API_URL" ]; then
   echo "Starting auto-updater (interval: ${UPDATE_INTERVAL:-21600}s)..."
   while true; do
     sleep "${UPDATE_INTERVAL:-21600}"
@@ -50,7 +50,7 @@ if [ -n "$API_URL" ] && [ -n "$NODE_SECRET" ]; then
     node /app/updater/dht-update.mjs 2>&1 || echo "WARNING: Update check failed (will retry)"
   done
 else
-  echo "API_URL or NODE_SECRET not set — auto-updater disabled"
+  echo "API_URL not set — auto-updater disabled"
   echo "Sidecar will stay running to allow manual updates"
   # Keep container alive
   tail -f /dev/null
