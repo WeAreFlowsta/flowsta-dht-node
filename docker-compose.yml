@@ -57,6 +57,7 @@ services:
     restart: unless-stopped
     profiles: ["bootstrap"]
     command:
+      - "kitsune2-bootstrap-srv"
       - "--production"
       - "--listen"
       - "[::]:443"
