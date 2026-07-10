@@ -29,22 +29,44 @@ reach each other even if Flowsta's own infrastructure is unreachable.
 ## Quick start (basic node)
 
 ```bash
-# 1. Clone
 git clone https://github.com/WeAreFlowsta/flowsta-dht-node.git
 cd flowsta-dht-node
-
-# 2. Configure — the example works as-is for the production network
-cp conductor-config-example.yaml conductor-config.yaml
-
-# 3. Point the updater at the Flowsta API
-echo "API_URL=https://auth-api.flowsta.com" > .env
-
-# 4. Start
-docker compose up -d
+./setup.sh
 ```
 
-That's it. The conductor image is public (no registry login), the
-bundled DNAs install on first boot, and the sidecar keeps them current.
+That's it. The script checks Docker, writes the production-network
+config, and starts the node. The conductor image is public (no registry
+login), the bundled DNAs install on first boot, and the sidecar keeps
+them current - including any public DNAs Flowsta adds in the future,
+each download verified against published checksums before install.
+
+<details>
+<summary>Prefer to do it by hand?</summary>
+
+```bash
+cp conductor-config-example.yaml conductor-config.yaml   # works as-is for production
+echo "API_URL=https://auth-api.flowsta.com" > .env
+docker compose up -d
+```
+</details>
+
+## What you're signing up for
+
+- **Public data only.** Your node stores identity records and document
+  signatures - the network's public layer. Private user data never
+  reaches your node, by construction.
+- **Disk** grows slowly with network history (20 GB headroom is plenty
+  today). **Bandwidth** is light for the basic node; only the optional
+  bootstrap role relays traffic.
+- **Zero maintenance.** DNA updates are automatic and
+  checksum-verified. `git pull && docker compose up -d` occasionally
+  for node software updates.
+- **Stop anytime.** `docker compose down` - the network loses one
+  redundant copy and nothing else. No penalties, no obligations.
+
+Questions or want to tell us your node exists (especially bootstrap
+nodes - see below)? [Discord](https://discord.gg/p7sfaZTaEc) or
+hello@flowsta.com.
 
 ## Verify your node actually joined the network
 
@@ -95,15 +117,24 @@ work**. Ask your ISP for a public IP (many provide one on request,
 free or cheap), then continue. The basic node needs none of this —
 CGNAT only blocks the bootstrap role.
 
-Then:
+Then, with a domain pointed at your public IP and ports 80/443
+forwarded:
 
 ```bash
-# One-time: get a certificate (stop anything on :80 first)
-sudo certbot certonly --standalone -d node.example.com
+./setup.sh bootstrap
+```
 
-# Start the node WITH the bootstrap role
+The script re-checks CGNAT with you, verifies your DNS, obtains the
+certificate, and starts the node with the bootstrap role.
+
+<details>
+<summary>Prefer to do it by hand?</summary>
+
+```bash
+sudo certbot certonly --standalone -d node.example.com   # stop anything on :80 first
 TLS_DOMAIN=node.example.com docker compose --profile bootstrap up -d
 ```
+</details>
 
 Verify: `curl -s https://node.example.com/` should answer. Then tell
 us about your node — community bootstrap URLs are distributed to
@@ -119,13 +150,25 @@ without the profile.
 
 A HoloPort is a capable little x86 box for this. The path:
 
-1. Reflash it with stock Ubuntu Server from USB (it will no longer run
-   HoloPortOS).
-2. Install Docker (`curl -fsSL https://get.docker.com | sh`).
-3. Follow the Quick start above.
+Tested end-to-end on a real HoloPort (it becomes the network's kind of
+node it was always meant to be):
 
-*(This section will be expanded with exact, tested steps — including
-BIOS/boot specifics — from our first HoloPort conversion.)*
+1. Flash **Ubuntu Server 24.04 LTS** (amd64) to a 4 GB+ USB stick
+   (balenaEtcher or `dd`). Everything on the HoloPort - HoloPortOS and
+   any HoloFuel state - will be erased.
+2. Plug in keyboard, monitor, ethernet, and the USB. Power on and tap
+   the boot-menu key: **F11** (then F10 or DEL/F2 for the BIOS boot
+   order if the menu doesn't bite).
+3. Through the installer: **use entire disk**, and **install the
+   OpenSSH server** - after this the box runs headless.
+4. While you're in the BIOS anyway: enable **restore on power loss**
+   (usually under Chipset/ACPI) so the node comes back by itself after
+   an outage.
+5. Reboot, pull the USB, SSH in, install Docker
+   (`curl -fsSL https://get.docker.com | sh`,
+   `sudo usermod -aG docker $USER`, log out and back in).
+6. Follow the Quick start above. Done in ~45 minutes, most of it
+   unattended.
 
 ## Configuration reference
 
@@ -202,4 +245,5 @@ docker logs flowsta-sidecar --tail 50      # DNA installs + updates
 
 ## License
 
-See [LICENSE](LICENSE).
+Apache-2.0 - see [LICENSE](LICENSE). The bundled `.happ` files are built
+from Flowsta's DNA repositories, also Apache-2.0.

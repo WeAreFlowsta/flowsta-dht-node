@@ -85,7 +85,16 @@ async function main() {
     `${API_URL}/api/v1/vault/node/dna-versions`
   );
 
-  console.log(`Available — identity: [${versions.identity_dna.all_versions.join(', ')}], signing: [${versions.signing_dna.all_versions.join(', ')}]`);
+  // Prefer the generic public_dnas list (any current or FUTURE public DNA
+  // type the API serves); fall back to the legacy fixed keys for older APIs.
+  const publicDnas = Array.isArray(versions.public_dnas) && versions.public_dnas.length > 0
+    ? versions.public_dnas
+    : [
+        { type: 'identity', app_id_prefix: 'flowsta_identity_v', ...versions.identity_dna },
+        { type: 'signing', app_id_prefix: 'flowsta_signing_v', ...versions.signing_dna },
+      ];
+
+  console.log(`Available — ${publicDnas.map(d => `${d.type}: [${(d.all_versions || []).join(', ')}]`).join(', ')}`);
 
   // 2. Connect to local conductor
   const admin = await AdminWebsocket.connect({
@@ -107,20 +116,16 @@ async function main() {
       console.log('Generated new agent key');
     }
 
-    // 3. Find missing versions
+    // 3. Find missing versions across every public DNA type the API lists
     const toInstall = [];
 
-    for (const version of versions.identity_dna.all_versions) {
-      const appId = `flowsta_identity_v${version.replace('.', '_')}`;
-      if (!installedIds.has(appId)) {
-        toInstall.push({ type: 'identity', version, appId });
-      }
-    }
-
-    for (const version of versions.signing_dna.all_versions) {
-      const appId = `flowsta_signing_v${version.replace('.', '_')}`;
-      if (!installedIds.has(appId)) {
-        toInstall.push({ type: 'signing', version, appId });
+    for (const dna of publicDnas) {
+      const prefix = dna.app_id_prefix || `flowsta_${dna.type}_v`;
+      for (const version of dna.all_versions || []) {
+        const appId = `${prefix}${version.replace('.', '_')}`;
+        if (!installedIds.has(appId)) {
+          toInstall.push({ type: dna.type, version, appId, checksums: dna.checksums || {} });
+        }
       }
     }
 
@@ -134,7 +139,7 @@ async function main() {
     // 4. Download and install each missing version
     fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
-    for (const { type, version, appId } of toInstall) {
+    for (const { type, version, appId, checksums } of toInstall) {
       const versionSlug = version.replace('.', '_');
       const filename = `flowsta_${type}_v${versionSlug}_happ.happ`;
       const destPath = path.join(DOWNLOAD_DIR, filename);
@@ -165,7 +170,7 @@ async function main() {
       // — a drifted or corrupted bundle must fail loudly here, never join
       // the network as a different DNA.
       const happBytes = fs.readFileSync(happPath);
-      const expected = versions[`${type}_dna`]?.checksums?.[version];
+      const expected = checksums?.[version] ?? versions[`${type}_dna`]?.checksums?.[version];
       if (expected) {
         const actual = crypto.createHash('sha256').update(happBytes).digest('hex');
         if (actual !== expected.toLowerCase()) {
