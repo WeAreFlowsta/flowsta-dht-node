@@ -49,16 +49,25 @@ export async function probeConductor(admin, meta) {
   const nowUs = Date.now() * 1000;
   const apps = await admin.listApps({});
 
+  // Custodial (per-user, legacy) apps carry an agent-key suffix in their id;
+  // the API's own system apps do not. Split so an API node's tail is visible.
+  const isUserApp = (app) => USER_APP_SUFFIX.test(app.installed_app_id || '');
+  const custodial = apps.filter(isUserApp);
+  const system = apps.filter((a) => !isUserApp(a));
+
   // One entry per DNA hash (many apps share a DNA on an API node).
   const byDna = new Map();
   for (const app of apps) {
     if (app.status?.type !== 'enabled') continue;
+    const user = isUserApp(app);
     for (const [role, cells] of Object.entries(app.cell_info || {})) {
       const cell = (cells || []).find((c) => c.type === 'provisioned' && c.value?.cell_id);
       if (!cell) continue;
       const dnaB64 = encodeHashToBase64(cell.value.cell_id[0]);
-      if (!byDna.has(dnaB64)) byDna.set(dnaB64, { role: role.replace(USER_APP_SUFFIX, ''), cellId: cell.value.cell_id, cells: 0 });
-      byDna.get(dnaB64).cells++;
+      if (!byDna.has(dnaB64)) byDna.set(dnaB64, { role: role.replace(USER_APP_SUFFIX, ''), cellId: cell.value.cell_id, cells: 0, cells_user: 0, cells_system: 0 });
+      const e = byDna.get(dnaB64);
+      e.cells++;
+      if (user) e.cells_user++; else e.cells_system++;
     }
   }
 
@@ -95,6 +104,8 @@ export async function probeConductor(admin, meta) {
       role: info.role,
       dna: dnaB64.slice(0, 12),
       cells: info.cells,
+      cells_user: info.cells_user,
+      cells_system: info.cells_system,
       local_ops: gossip.local_op_count ?? null,
       top_hash: summary ? (toB64(summary.disc_top_hash) || '').slice(0, 16) : null,
       disc_boundary: summary?.disc_boundary ?? null,
@@ -115,6 +126,10 @@ export async function probeConductor(admin, meta) {
     endpoint: endpointOf((stats?.transport_stats?.peer_urls || [])[0]),
     apps: apps.length,
     apps_enabled: apps.filter((a) => a.status?.type === 'enabled').length,
+    apps_custodial: custodial.length,
+    apps_custodial_enabled: custodial.filter((a) => a.status?.type === 'enabled').length,
+    apps_system: system.length,
+    apps_system_enabled: system.filter((a) => a.status?.type === 'enabled').length,
     connections: conns.length,
     direct: conns.filter((c) => c.is_direct).length,
     software: meta.software,
