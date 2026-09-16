@@ -15,10 +15,21 @@
 
 services:
   conductor:
-    image: ${CONDUCTOR_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode:hc0.6.1}
+    # Pinned by digest so every node runs the exact image Flowsta verified
+    # (tag hc0.6.1, Holochain 0.6.1 / Iroh). Override with CONDUCTOR_IMAGE only
+    # when Flowsta publishes a new one.
+    image: ${CONDUCTOR_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:900987b0daadd3fda65821c8855e06fac92398fe3872c53ac133bbfb1158d0f2}
     container_name: flowsta-conductor
     network_mode: host
     restart: unless-stopped
+    # Docker 29 starts processes at a 1024 open-file soft limit; a conductor
+    # opens several SQLite files per cell and panics under it as the network
+    # grows. memlock unlimited silences sqlcipher's mlock warnings.
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+      memlock: -1
     volumes:
       - conductor-data:/data
       - ./conductor-config.yaml:/usr/local/share/holochain/conductor-config.template.yaml:ro
