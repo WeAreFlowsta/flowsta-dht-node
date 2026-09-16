@@ -41,6 +41,9 @@ services:
       - API_URL=${API_URL}
       - NODE_SECRET=${NODE_SECRET}
       - UPDATE_INTERVAL=${UPDATE_INTERVAL:-21600}
+      - NODE_LABEL=${NODE_LABEL:-}
+      - REPORT_INTERVAL=${REPORT_INTERVAL:-600}
+      - REPORT_DISABLED=${REPORT_DISABLED:-0}
     logging:
       driver: json-file
       options:

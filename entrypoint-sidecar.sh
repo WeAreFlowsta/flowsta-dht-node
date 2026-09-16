@@ -41,6 +41,20 @@ fi
 echo "Installing bundled DNAs..."
 node /app/install-bundled-dnas.mjs || echo "WARNING: DNA install had errors (updater will retry)"
 
+# Network health reporting (default on; REPORT_DISABLED=1 opts out).
+# First report ~60 s after start so the conductor has settled, then every
+# REPORT_INTERVAL seconds (default 600). Failures only warn.
+if [ -n "$API_URL" ] && [ "${REPORT_DISABLED:-0}" != "1" ]; then
+  echo "Starting network reporting (interval: ${REPORT_INTERVAL:-600}s, label: ${NODE_LABEL:-$(hostname)})..."
+  (
+    sleep 60
+    while true; do
+      node /app/updater/network-report.mjs 2>&1 || echo "WARNING: Network report failed (will retry)"
+      sleep "${REPORT_INTERVAL:-600}"
+    done
+  ) &
+fi
+
 # Auto-updater loop
 if [ -n "$API_URL" ]; then
   echo "Starting auto-updater (interval: ${UPDATE_INTERVAL:-21600}s)..."

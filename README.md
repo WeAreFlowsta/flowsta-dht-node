@@ -58,9 +58,21 @@ docker compose up -d
 - **Disk** grows slowly with network history (20 GB headroom is plenty
   today). **Bandwidth** is light for the basic node; only the optional
   bootstrap role relays traffic.
-- **Zero maintenance.** DNA updates are automatic and
-  checksum-verified. `git pull && docker compose up -d` occasionally
-  for node software updates.
+- **Low maintenance, not zero.** DNA updates are automatic and
+  checksum-verified. Three things are still yours to do, occasionally:
+  `git pull && docker compose pull && docker compose up -d` for node
+  software and conductor updates, your operating system's own updates,
+  and (bootstrap role only) a `docker restart` after a certificate
+  renewal. See [Updating](#updating).
+- **Your node reports its health.** Every 10 minutes the sidecar sends
+  the Flowsta API a small report: which public DNAs it holds, whether
+  its copy agrees with the rest of the network, how recently it
+  gossiped with each peer, and whether its connections are direct or
+  relayed. Peers appear as anonymous connection ids - never as agent
+  keys, and never any private data. This is how the network's health is
+  monitored as a whole and how a node earns a place in the bootstrap
+  fallback list later. Set `REPORT_DISABLED=1` to opt out; the node
+  works the same either way.
 - **Stop anytime.** `docker compose down` - the network loses one
   redundant copy and nothing else. No penalties, no obligations.
 
@@ -181,6 +193,9 @@ Create a `.env` file in the repo root:
 | `UPDATE_INTERVAL` | No | `21600` (6 h) | Seconds between auto-update checks |
 | `TLS_DOMAIN` | bootstrap role | — | Domain whose Let's Encrypt cert to serve |
 | `NODE_SECRET` | No | — | Legacy; bundle downloads are open (sha256-verified) |
+| `NODE_LABEL` | No | hostname | Name your node reports under (lowercase letters, digits, dashes) |
+| `REPORT_INTERVAL` | No | `600` (10 min) | Seconds between health reports |
+| `REPORT_DISABLED` | No | `0` | Set `1` to send no health reports |
 
 **Networks:** the example config joins the **production** network —
 the only network community nodes should join. (Flowsta operates
@@ -224,6 +239,19 @@ docker compose up -d          # add --profile bootstrap if you run it
 
 Old DNA versions are kept on purpose — your node keeps serving history
 for peers on older versions.
+
+**What is still manual today** (an automatic, verified update path is
+planned - see the Flowsta docs when it ships): the conductor image and
+node software (`docker compose pull` above), your operating system's
+updates, and a `docker restart flowsta-bootstrap` after Let's Encrypt
+renews the certificate (bootstrap role only). If your OS applies Docker
+updates unattended, turn on Docker's `live-restore` so a Docker restart
+leaves the conductor running:
+
+```bash
+echo '{ "live-restore": true }' | sudo tee /etc/docker/daemon.json && sudo systemctl reload docker
+```
+(merge into an existing `daemon.json` rather than overwriting it).
 
 ## Logs & troubleshooting
 

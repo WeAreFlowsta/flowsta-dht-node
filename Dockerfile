@@ -19,7 +19,7 @@ RUN npm install --production
 
 # Copy scripts
 COPY install-bundled-dnas.mjs ./
-COPY updater/dht-update.mjs ./updater/
+COPY updater/dht-update.mjs updater/network-probe.mjs updater/network-report.mjs ./updater/
 
 # Copy bundled hApp files
 COPY happs/ ./happs/
