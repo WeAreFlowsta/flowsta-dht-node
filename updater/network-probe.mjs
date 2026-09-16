@@ -16,6 +16,7 @@
  * The same file, byte for byte, lives in the public node repo as
  * flowsta-dht-node/updater/network-probe.mjs and api/src/services/networkProbe.js. Change both.
  */
+import { createHash } from 'crypto';
 import { encodeHashToBase64 } from '@holochain/client';
 
 export const PROBE_VERSION = 1;
@@ -100,6 +101,15 @@ export async function probeConductor(admin, meta) {
       if (Number(ai.expiresAt) > nowUs) { live.add(ep); liveEndpoints.add(ep); }
     }
     const summary = gossip.dht_summary ? Object.values(gossip.dht_summary)[0] : null;
+    // The settled past is one hash (disc_top_hash); the recent window is a
+    // ring of per-slice hashes. Fold the ring into one digest so nodes can
+    // be compared on the recent window too. Empty slices are skipped.
+    let ringHash = null;
+    if (summary && Array.isArray(summary.ring_top_hashes)) {
+      const h = createHash('sha256');
+      for (const x of summary.ring_top_hashes) { const b = toB64(x); if (b) h.update(b); }
+      ringHash = h.digest('base64').slice(0, 16);
+    }
     dnas.push({
       role: info.role,
       dna: dnaB64.slice(0, 12),
@@ -109,6 +119,7 @@ export async function probeConductor(admin, meta) {
       local_ops: gossip.local_op_count ?? null,
       top_hash: summary ? (toB64(summary.disc_top_hash) || '').slice(0, 16) : null,
       disc_boundary: summary?.disc_boundary ?? null,
+      ring_hash: ringHash,
       pending_fetch: Object.keys(nm.fetch_state_summary?.pending_requests || {}).length,
       agents: agentInfos.length,
       endpoints_known: known.size,
