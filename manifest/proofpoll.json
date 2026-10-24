@@ -1,0 +1,39 @@
+{
+  "v": 1,
+  "channel": "proofpoll",
+  "issued_at": "<set by tools/sign-manifest.mjs>",
+  "sequence": 0,
+  "generations": [
+    {
+      "id": "holochain-0.6",
+      "state": "serving",
+      "holochain": "0.6.1",
+      "adopts_legacy_conductor": true,
+      "conductor": {
+        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:900987b0daadd3fda65821c8855e06fac92398fe3872c53ac133bbfb1158d0f2",
+        "admin_port": 4444
+      },
+      "bootstrap": {
+        "url": "https://bootstrap.flowsta.com"
+      },
+      "dnas": [
+        {
+          "app_id": "proofpoll_v1_3",
+          "sha256": "7cac687ab376a5dbdad453a8b77768edec30c5bd656adb57f7dad5ad69eeb197",
+          "url": "https://raw.githubusercontent.com/WeAreFlowsta/ProofPoll/proofpoll-v0.4.2/dna/v1.3/workdir/proofpoll_v1_3_happ.happ"
+        }
+      ]
+    }
+  ],
+  "agent": {
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:d91d0fdff1df88da6457b588dcf0eff2100c0847bb21c61c1eca6858ada3f2de"
+  },
+  "advisories": [
+    {
+      "id": "2026-10-proofpoll-agent",
+      "severity": "routine",
+      "action": "notice",
+      "text": "proofpoll-node is now kept current from this manifest: the agent takes over the existing conductor and its data. ProofPoll's auth material is carried over. The Holochain 0.7 generation (DNA v1.4) follows once a 0.7 bootstrap host exists."
+    }
+  ]
+}
