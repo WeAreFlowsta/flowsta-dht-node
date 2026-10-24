@@ -59,10 +59,16 @@ conductor), in two steps so the agent can read your running conductor
 before anything is removed:
 
 ```bash
-git pull && docker compose up -d agent
+git pull
+echo 'UPDATE_WINDOW=00:00-00:00' >> .env   # open the window for this first run
+docker compose up -d agent
 docker logs -f flowsta-agent        # wait for "now on sha256:…" (about a minute)
 docker compose up -d --remove-orphans              # add --profile bootstrap if you run that role
 ```
+
+Then set `UPDATE_WINDOW` in `.env` back to the hours you want (default
+`03:00-05:00` in your `TZ`) and run `docker compose up -d agent` once
+more; the agent keeps its state across the recreate.
 
 The agent adopts the running conductor: it carries your auth material
 and data path over from its config, stops it, creates the new conductor
