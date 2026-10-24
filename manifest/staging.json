@@ -53,6 +53,19 @@
           "url": "https://auth-api-staging.flowsta.com/api/v1/vault/node/dna-bundle/signing/1.4"
         }
       ]
+    },
+    {
+      "id": "holochain-0.7",
+      "state": "serving",
+      "holochain": "0.7.1",
+      "conductor": {
+        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f",
+        "admin_port": 4445
+      },
+      "bootstrap": {
+        "url": "https://bootstrap-staging-7.flowsta.com"
+      },
+      "dnas": []
     }
   ],
   "agent": {
@@ -60,16 +73,16 @@
   },
   "advisories": [
     {
-      "id": "2026-10-staging-agent",
-      "severity": "routine",
-      "action": "notice",
-      "text": "First signed manifest for the staging network: the agent takes over the existing conductor and its data. The Holochain 0.7 generation follows once bootstrap-staging-7 exists."
-    },
-    {
       "id": "2026-10-staging-identity-set",
       "severity": "routine",
       "action": "notice",
       "text": "Identity 1.0 to 1.2 are left out on staging: those bundle files are not installable on a 0.6.1 conductor (an older bundle format, one missing wasm). Nodes that hold them keep them."
+    },
+    {
+      "id": "2026-10-staging-two-generations",
+      "severity": "routine",
+      "action": "notice",
+      "text": "The Holochain 0.7 generation joins the staging network: a second conductor on admin port 4445, bootstrapping from bootstrap-staging-7. No DNAs on it yet; the 0.6 conductor and its data are untouched."
     }
   ]
 }
