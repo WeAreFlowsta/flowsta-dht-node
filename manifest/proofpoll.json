@@ -26,7 +26,7 @@
     },
     {
       "id": "holochain-0.7",
-      "state": "retired",
+      "state": "serving",
       "holochain": "0.7.1",
       "conductor": {
         "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f",
@@ -53,12 +53,6 @@
       "severity": "routine",
       "action": "notice",
       "text": "The Holochain 0.7 generation joins proofpoll-node: a second conductor on admin port 4445 with ProofPoll DNA v1.4, bootstrapping from bootstrap-7. The 0.6 conductor with v1.3 is untouched; ProofPoll 0.5.0 brings the app to v1.4."
-    },
-    {
-      "id": "2026-10-proofpoll-07-parked",
-      "severity": "routine",
-      "action": "notice",
-      "text": "The 0.7 conductor is parked (stopped, data kept) until the node has swap: compiling DNA v1.4 on 1 GB without swap stalled the box. It resumes with the next manifest."
     }
   ]
 }
