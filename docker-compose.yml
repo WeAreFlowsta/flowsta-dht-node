@@ -62,6 +62,9 @@ services:
     image: haproxy:3.0-alpine
     container_name: flowsta-bootstrap-proxy
     network_mode: host
+    # The image runs as the unprivileged haproxy user, which cannot bind :443
+    # on the host network; the proxy only reads the TLS hello and forwards.
+    user: root
     restart: unless-stopped
     profiles: ["bootstrap"]
     environment:
