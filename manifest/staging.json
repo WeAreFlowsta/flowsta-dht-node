@@ -10,7 +10,7 @@
       "holochain": "0.6.1",
       "adopts_legacy_conductor": true,
       "conductor": {
-        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:900987b0daadd3fda65821c8855e06fac92398fe3872c53ac133bbfb1158d0f2",
+        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:901eb1ee902a7b095161bf83e5a25f5d101b11499000ac3f0da84baa0b76235c",
         "admin_port": 4444
       },
       "bootstrap": {
@@ -70,6 +70,12 @@
       "severity": "routine",
       "action": "notice",
       "text": "Identity 1.0 to 1.2 are left out on staging: those bundle files are not installable on a 0.6.1 conductor (an older bundle format, one missing wasm). Nodes that hold them keep them."
+    },
+    {
+      "id": "2026-10-staging-rollback-drill",
+      "severity": "routine",
+      "action": "notice",
+      "text": "Rollback drill: this manifest names an image that is not a conductor. The agent must bring the previous conductor back."
     }
   ]
 }

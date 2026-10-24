@@ -193,7 +193,16 @@ async function swapConductor(gen, oldContainer, { dataVolume, dataBind }, sequen
   const name = containerNameFor(gen.id);
   const started = nowUnix();
   log(`${gen.id}: ${reason}; replacing ${oldContainer.name} on ${dataBind || dataVolume}`);
-  await docker.pullImage(gen.image);
+  try {
+    await docker.pullImage(gen.image);
+  } catch (e) {
+    // Nothing was touched; remember the digest so a bad manifest is not retried every minute.
+    const g = (state.generations[gen.id] ||= {});
+    g.failed = { image: gen.image, configSha: gen.configSha, at: Date.now(), reason: `pull: ${e.message}` };
+    remember(state, { event: 'pull_failed', generation: gen.id, image: gen.image, reason: e.message });
+    persist();
+    throw e;
+  }
   await docker.updateContainer(oldContainer.id, { RestartPolicy: { Name: 'no' } }).catch(() => {});
   await docker.stopContainer(oldContainer.id, 90);
   await docker.renameContainer(oldContainer.id, `${name}-previous`);
