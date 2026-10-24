@@ -27,6 +27,7 @@
  *   TRACING_OVERRIDE          conductor tracing (default info,kitsune2=info)
  *   CONDUCTOR_DATA_ROOT       data_root_path inside the conductor container; default: carried over from the
  *                             adopted conductor, else /data/holochain. Never change it for a running generation.
+ *   CONDUCTOR_LAIR_ROOT       lair_root (default <CONDUCTOR_DATA_ROOT>/ks)
  *   LEGACY_CONDUCTOR_NAMES    containers the agent may adopt (default flowsta-conductor,holochain-conductor)
  *   LEGACY_DATA_VOLUMES       volumes of an already-removed conductor the agent may adopt
                              (default flowsta-dht-node_conductor-data,holochain-data,holochain-conductor-data)
@@ -147,8 +148,14 @@ async function observe() {
   return { managed, legacy, agentImage: self?.Config?.Image || null, self };
 }
 
+/** The operator's env wins over what was carried or remembered. */
+function withEnvOverrides(auth) {
+  if (!env.CONDUCTOR_DATA_ROOT) return auth;
+  return { ...auth, dataRoot: env.CONDUCTOR_DATA_ROOT, lairRoot: env.CONDUCTOR_LAIR_ROOT || `${env.CONDUCTOR_DATA_ROOT}/ks` };
+}
+
 async function authMaterial(legacy) {
-  if (state.auth) return state.auth;
+  if (state.auth) return withEnvOverrides(state.auth);
   let auth = { authBootstrap: env.BOOTSTRAP_AUTH_MATERIAL, authRelay: env.RELAY_AUTH_MATERIAL, tracing: env.TRACING_OVERRIDE };
   if ((!auth.authBootstrap || !auth.authRelay) && legacy) {
     try {
@@ -160,13 +167,12 @@ async function authMaterial(legacy) {
       log(`carried auth material, tracing and the data path (${carried.dataRoot || '/data/holochain'}) over from the existing conductor config`);
     } catch (e) { log(`could not read the existing conductor config (${e.message}); using the community client id`); }
   }
-  if (env.CONDUCTOR_DATA_ROOT) auth.dataRoot = env.CONDUCTOR_DATA_ROOT;
   auth.authBootstrap ||= COMMUNITY_AUTH_MATERIAL;
   auth.authRelay ||= auth.authBootstrap;
   auth.tracing ||= 'info,kitsune2=info';
   state.auth = auth;
   persist();
-  return auth;
+  return withEnvOverrides(auth);
 }
 
 function desiredFrom(manifest, auth) {
@@ -206,8 +212,23 @@ async function renameEvicting(id, name) {
   await docker.renameContainer(id, name);
 }
 
-async function verifyGeneration(gen, containerId, sinceUnix, { adminWaitMs } = {}) {
-  return verifyConductor({ adminUrl: `ws://localhost:${gen.adminPort}`, holochain: gen.holochain, expectedAppIds: [], docker, containerId, sinceUnix, adminWaitMs, log });
+async function verifyGeneration(gen, containerId, sinceUnix, { adminWaitMs, expectedAppIds = [] } = {}) {
+  return verifyConductor({ adminUrl: `ws://localhost:${gen.adminPort}`, holochain: gen.holochain, expectedAppIds, docker, containerId, sinceUnix, adminWaitMs, log });
+}
+
+/** The apps a running conductor holds, so its replacement can be held to the same list. */
+async function appsOf(adminPort, holochain) {
+  let admin;
+  try {
+    admin = await connectAdmin(`ws://localhost:${adminPort}`, { waitMs: 20000, holochain });
+    const apps = await admin.listApps({});
+    return apps.map((a) => a.installed_app_id);
+  } catch (e) {
+    log(`could not list the running conductor's apps (${e.message}); the replacement is verified without them`);
+    return [];
+  } finally {
+    await admin?.client.close().catch(() => {});
+  }
 }
 
 /** Replace (or adopt) with rollback: the old container is kept as <name>-previous until the new one verifies. */
@@ -215,6 +236,10 @@ async function swapConductor(gen, oldContainer, { dataVolume, dataBind }, sequen
   const name = containerNameFor(gen.id);
   const started = nowUnix();
   log(`${gen.id}: ${reason}; replacing ${oldContainer.name} on ${dataBind || dataVolume}`);
+  // What the old conductor holds is what the new one must hold: a conductor
+  // that comes up empty beside the real data (a changed data path) fails here.
+  const expectedAppIds = oldContainer.running === false ? [] : await appsOf(gen.adminPort, gen.holochain);
+  if (expectedAppIds.length) log(`${gen.id}: the replacement must carry ${expectedAppIds.length} apps`);
   try {
     await docker.pullImage(gen.image);
   } catch (e) {
@@ -231,7 +256,7 @@ async function swapConductor(gen, oldContainer, { dataVolume, dataBind }, sequen
   let newId;
   try {
     newId = await createConductor(gen, { dataVolume, dataBind }, sequence);
-    const verdict = await verifyGeneration(gen, newId, started);
+    const verdict = await verifyGeneration(gen, newId, started, { expectedAppIds });
     if (!verdict.ok) throw new Error(`verification failed: ${verdict.checks.filter((c) => !c.ok).map((c) => `${c.check}: ${c.reason}`).join('; ')}`);
   } catch (e) {
     log(`${gen.id}: ROLLBACK (${e.message})`);
@@ -293,7 +318,7 @@ async function applyAction(action, desired, observed) {
         persist();
         return `${gen.id}: adopted ${observed.legacy.name}`;
       }
-      const ok = await swapConductor(gen, { id: observed.legacy.id, name: observed.legacy.name, image: observed.legacy.inspect.Config?.Image }, { dataVolume: mount.volume, dataBind: mount.bind }, sequence, `adopting ${observed.legacy.name}`);
+      const ok = await swapConductor(gen, { id: observed.legacy.id, name: observed.legacy.name, image: observed.legacy.inspect.Config?.Image, running: observed.legacy.running }, { dataVolume: mount.volume, dataBind: mount.bind }, sequence, `adopting ${observed.legacy.name}`);
       if (ok) { g.adopted = { from: observed.legacy.name, at: new Date().toISOString() }; persist(); }
       return `${gen.id}: adopt ${ok ? 'done' : 'rolled back'}`;
     }
