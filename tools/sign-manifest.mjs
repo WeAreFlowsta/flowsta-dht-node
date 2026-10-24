@@ -62,9 +62,24 @@ function localKey(file) {
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : dflt; };
-const optionValues = new Set(['--sequence', '--api', '--vault', '--local-key', '--print-did'].map((f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null; }));
+const optionValues = new Set(['--sequence', '--api', '--vault', '--local-key', '--print-did', '--publish-file'].map((f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null; }));
 const channel = args.find((a) => !a.startsWith('--') && !optionValues.has(a));
 if (opt('print-did')) { console.log(localKey(opt('print-did')).did); process.exit(0); }
+// --publish-file <signed.json>: upload a manifest signed earlier (e.g. signed
+// before the API that serves the channel was deployed). Verified first.
+if (opt('publish-file')) {
+  const file = opt('publish-file');
+  const signed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const api = (opt('api', process.env.FLOWSTA_API_URL || 'https://auth-api.flowsta.com')).replace(/\/$/, '');
+  const signer = process.env.MANIFEST_SIGNER_DID || DEFAULT_SIGNER_DID;
+  const verdict = verifyManifest(signed, { signerDid: signed.signature?.signer === signer ? signer : signed.signature?.signer, previousSequence: 0 });
+  if (!verdict.ok) throw new Error(`${file} does not verify: ${verdict.reason}`);
+  const r = await fetch(`${api}/api/v1/vault/node/manifest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(signed) });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`upload refused: ${r.status} ${text}`);
+  console.log(`published ${signed.channel} #${signed.sequence}: ${text}`);
+  process.exit(0);
+}
 if (!channel) { console.error('usage: sign-manifest.mjs <channel> [--sequence N] [--no-upload] [--api URL] [--vault URL] [--local-key FILE]\n       sign-manifest.mjs --print-did FILE'); process.exit(2); }
 const localKeyFile = opt('local-key');
 if (localKeyFile && channel === 'stable') { console.error('the stable channel is signed by @weareflowsta in the Vault only; --local-key is refused'); process.exit(2); }
