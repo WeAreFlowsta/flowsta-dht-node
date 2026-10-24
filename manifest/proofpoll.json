@@ -26,7 +26,7 @@
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:ba7838a35dd6d33e2e36ce7e08259a88e0ba25759a68a3df0c3732c0c59a03f3"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:6b0f371dc50c9d0c05ab1496ca653e6e612277d10cc235f7d064ffdb35fcc7f9"
   },
   "advisories": [
     {
