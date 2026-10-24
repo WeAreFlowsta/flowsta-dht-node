@@ -24,8 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { generateKeyPairSync } from 'node:crypto';
-import { statementFor, verifyManifest, didToVerifyKey } from '../agent/lib/manifest.mjs';
-import { DEFAULT_SIGNER_DID } from '../agent/agent.mjs';
+import { statementFor, verifyManifest, didToVerifyKey, DEFAULT_SIGNER_DID } from '../agent/lib/manifest.mjs';
 
 const args = process.argv.slice(2);
 const channel = args.find((a) => !a.startsWith('--'));

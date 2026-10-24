@@ -39,7 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { Docker, conductorContainerSpec } from './lib/docker.mjs';
-import { verifyManifest } from './lib/manifest.mjs';
+import { verifyManifest, DEFAULT_SIGNER_DID } from './lib/manifest.mjs';
 import { planActions, legacyDataMount, actionableAdvisories, containerNameFor, dataVolumeFor, MANAGED_LABEL, GENERATION_LABEL, CONFIG_LABEL, IMAGE_LABEL, SEQUENCE_LABEL } from './lib/plan.mjs';
 import { parseWindow, inWindow } from './lib/window.mjs';
 import { renderConductorConfig, carryOverFromConfig } from './lib/conductor-config.mjs';
@@ -49,9 +49,6 @@ import { reconcileDnas } from './lib/dnas.mjs';
 import { verifyConductor, connectAdmin } from './lib/verify.mjs';
 import { probeConductor } from '../updater/network-probe.mjs';
 
-// Team Flowsta's identity (@weareflowsta). Changing it takes a new agent
-// image, which itself only arrives through a manifest this key signed.
-export const DEFAULT_SIGNER_DID = 'did:flowsta:uhCAkWuA-Ehm9EVzcsPE2Wo_vpc9ImljHN8NMMEXpbtG5BdooOV9a';
 const COMMUNITY_AUTH_MATERIAL = 'eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0=';
 const TEMPLATE_DIR = '/usr/local/share/holochain';
 const TEMPLATE_FILE = 'conductor-config.template.yaml';

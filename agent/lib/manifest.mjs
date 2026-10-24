@@ -15,6 +15,10 @@ import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto
 import { canonicalJson } from './canonical.mjs';
 
 export const STATEMENT_PREFIX = 'flowsta-node-manifest:v1:';
+
+// Team Flowsta's identity (@weareflowsta). Changing it takes a new agent
+// image, which itself only arrives through a manifest this key signed.
+export const DEFAULT_SIGNER_DID = 'did:flowsta:uhCAkWuA-Ehm9EVzcsPE2Wo_vpc9ImljHN8NMMEXpbtG5BdooOV9a';
 export const GENERATION_STATES = new Set(['serving', 'retiring', 'retired']);
 const GEN_ID = /^[a-z0-9][a-z0-9.-]{0,31}$/;
 const DIGEST_IMAGE = /^[a-z0-9][a-z0-9._\/-]*@sha256:[0-9a-f]{64}$/;
