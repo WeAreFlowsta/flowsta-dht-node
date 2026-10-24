@@ -10,7 +10,7 @@ Image digests (2026-10-24, Cloud Build):
 
 | Image | Tag | Digest |
 |---|---|---|
-| `flowsta-dht-node` (agent) | 2.0.4 | `sha256:d91d0fdff1df88da6457b588dcf0eff2100c0847bb21c61c1eca6858ada3f2de` |
+| `flowsta-dht-node` (agent) | 2.0.5 | `sha256:ba7838a35dd6d33e2e36ce7e08259a88e0ba25759a68a3df0c3732c0c59a03f3` |
 | `flowsta-edgenode` | hc0.6.1 | `sha256:900987b0daadd3fda65821c8855e06fac92398fe3872c53ac133bbfb1158d0f2` |
 | `flowsta-edgenode` | hc0.7.1 | `sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f` |
 
