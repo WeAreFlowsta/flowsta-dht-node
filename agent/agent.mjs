@@ -123,7 +123,12 @@ async function observe() {
   const list = await docker.listContainers({ all: true, filters: { label: [`${MANAGED_LABEL}=agent`] } });
   const managed = list.map((c) => ({
     id: c.Id, name: (c.Names?.[0] || '').replace(/^\//, ''), image: c.Image, labels: c.Labels || {}, running: c.State === 'running', mounts: c.Mounts || [],
-  })).filter((c) => !c.name.endsWith('-previous'));
+  }));
+  // A conductor left as <name>-previous by an interrupted rollback stands in
+  // for its generation when nothing else holds the generation's name.
+  const names = new Set(managed.map((c) => c.name));
+  const managedView = managed.filter((c) => !c.name.endsWith('-previous') || !names.has(c.name.replace(/-previous$/, '')));
+  managed.length = 0; managed.push(...managedView);
   let legacy = null;
   for (const name of cfg.legacyNames) {
     const info = await docker.inspectContainer(name);
@@ -179,9 +184,23 @@ async function createConductor(gen, { dataVolume, dataBind }, sequence) {
   if (!dataBind) await docker.createVolume(dataVolume, { [MANAGED_LABEL]: 'agent', [GENERATION_LABEL]: gen.id }).catch((e) => { if (e.status !== 409) throw e; });
   const labels = { [MANAGED_LABEL]: 'agent', [GENERATION_LABEL]: gen.id, [CONFIG_LABEL]: gen.configSha, [IMAGE_LABEL]: gen.image, [SEQUENCE_LABEL]: String(sequence) };
   const created = await docker.createContainer(name, conductorContainerSpec({ image: gen.image, generation: gen.id, dataVolume, dataBind, labels }));
-  await docker.putArchive(created.Id, TEMPLATE_DIR, tarOfFile(TEMPLATE_FILE, gen.config));
-  await docker.startContainer(created.Id);
+  try {
+    await docker.putArchive(created.Id, TEMPLATE_DIR, tarOfFile(TEMPLATE_FILE, gen.config));
+    await docker.startContainer(created.Id);
+  } catch (e) {
+    // A container that never started must not keep the generation's name.
+    await docker.removeContainer(created.Id, { force: true }).catch(() => {});
+    throw e;
+  }
   return created.Id;
+}
+
+/** Give a container a name, evicting a stopped container that holds it. */
+async function renameEvicting(id, name) {
+  try { await docker.renameContainer(id, name); return; } catch (e) { if (e.status !== 409) throw e; }
+  const holder = await docker.inspectContainer(name);
+  if (holder && holder.Id !== id && !holder.State?.Running) await docker.removeContainer(holder.Id, { force: true });
+  await docker.renameContainer(id, name);
 }
 
 async function verifyGeneration(gen, containerId, sinceUnix, { adminWaitMs } = {}) {
@@ -214,7 +233,7 @@ async function swapConductor(gen, oldContainer, { dataVolume, dataBind }, sequen
   } catch (e) {
     log(`${gen.id}: ROLLBACK (${e.message})`);
     if (newId) await docker.removeContainer(newId, { force: true }).catch(() => {});
-    await docker.renameContainer(oldContainer.id, oldContainer.name === name ? name : oldContainer.name).catch(() => {});
+    await renameEvicting(oldContainer.id, oldContainer.name).catch((err) => log(`${gen.id}: could not give ${oldContainer.name} its name back: ${err.message}`));
     await docker.updateContainer(oldContainer.id, { RestartPolicy: { Name: 'unless-stopped' } }).catch(() => {});
     await docker.startContainer(oldContainer.id);
     const g = (state.generations[gen.id] ||= {});
