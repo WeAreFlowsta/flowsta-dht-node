@@ -43,8 +43,13 @@ RUN wget -q "https://github.com/holochain/holochain/releases/download/holochain-
 # still copied to /etc/holochain/conductor-config.yaml on every start, so
 # whoever runs the container supplies the config (the node agent renders it
 # from the signed manifest).
-RUN sed -i 's/grep -q "port: 4444"/grep -Eq "port: [0-9]+"/' /usr/local/bin/entrypoint.sh \
- && grep -Eq 'grep -Eq "port: \[0-9\]\+"' /usr/local/bin/entrypoint.sh
+# In this base the check is the s6 setup script; older bases kept it in an
+# entrypoint script. Patch every copy present and prove one was patched.
+RUN for f in /etc/s6-overlay/s6-rc.d/setup/init.sh /usr/local/bin/entrypoint.sh /entrypoint.sh; do \
+      [ -f "$f" ] && sed -i 's/grep -q "port: 4444"/grep -Eq "port: [0-9]+"/' "$f"; \
+    done; \
+    grep -l 'grep -Eq "port: \[0-9\]+"' /etc/s6-overlay/s6-rc.d/setup/init.sh /usr/local/bin/entrypoint.sh /entrypoint.sh 2>/dev/null | grep -q . \
+ && ! grep -rq 'port: 4444' /etc/s6-overlay/s6-rc.d/setup/init.sh
 
 LABEL org.flowsta.base="ghcr.io/holo-host/edgenode@sha256:bd6336f1a2a4ce47b819123e1ef84353cfc7357df5e1832ea59aba8ab77904d3" \
       org.flowsta.holochain-version="${HOLOCHAIN_VERSION}"
