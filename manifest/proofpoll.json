@@ -23,6 +23,25 @@
           "url": "https://raw.githubusercontent.com/WeAreFlowsta/ProofPoll/proofpoll-v0.4.2/dna/v1.3/workdir/proofpoll_v1_3_happ.happ"
         }
       ]
+    },
+    {
+      "id": "holochain-0.7",
+      "state": "serving",
+      "holochain": "0.7.1",
+      "conductor": {
+        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f",
+        "admin_port": 4445
+      },
+      "bootstrap": {
+        "url": "https://bootstrap-7.flowsta.com"
+      },
+      "dnas": [
+        {
+          "app_id": "proofpoll_v1_4",
+          "sha256": "160f768b90a5e5ae27252af472ea95166782c0949f9df137ad3fd96507928dac",
+          "url": "https://raw.githubusercontent.com/WeAreFlowsta/ProofPoll/169cc32/dna/v1.4/workdir/proofpoll_v1_4_happ.happ"
+        }
+      ]
     }
   ],
   "agent": {
@@ -30,10 +49,10 @@
   },
   "advisories": [
     {
-      "id": "2026-10-proofpoll-agent",
+      "id": "2026-10-proofpoll-two-generations",
       "severity": "routine",
       "action": "notice",
-      "text": "proofpoll-node is now kept current from this manifest: the agent takes over the existing conductor and its data. ProofPoll's auth material is carried over. The Holochain 0.7 generation (DNA v1.4) follows once a 0.7 bootstrap host exists."
+      "text": "The Holochain 0.7 generation joins proofpoll-node: a second conductor on admin port 4445 with ProofPoll DNA v1.4, bootstrapping from bootstrap-7. The 0.6 conductor with v1.3 is untouched; ProofPoll 0.5.0 brings the app to v1.4."
     }
   ]
 }
