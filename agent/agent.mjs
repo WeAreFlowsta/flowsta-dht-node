@@ -325,9 +325,12 @@ async function selfUpdate(image, self) {
   if (!self) return 'self-update skipped: cannot inspect own container (set AGENT_CONTAINER_NAME)';
   log(`agent: updating to ${image.split('@')[1]}`);
   await docker.pullImage(image);
+  // Carry the operator's settings, not the old image's own ENV (AGENT_VERSION
+  // and the like belong to the image that is being replaced).
+  const imageEnv = new Set((await docker.inspectImage(self.Config.Image))?.Config?.Env || []);
   const spec = {
     Image: image,
-    Env: self.Config.Env,
+    Env: (self.Config.Env || []).filter((e) => !imageEnv.has(e)),
     Labels: { ...(self.Config.Labels || {}), [IMAGE_LABEL]: image },
     HostConfig: { NetworkMode: self.HostConfig.NetworkMode, RestartPolicy: { Name: 'unless-stopped' }, Binds: self.HostConfig.Binds, Mounts: self.HostConfig.Mounts, LogConfig: self.HostConfig.LogConfig },
   };
