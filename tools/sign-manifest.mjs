@@ -62,9 +62,9 @@ if (!linked.linked) {
   const clientId = process.env.FLOWSTA_RELEASE_CLIENT_ID;
   if (!clientId) throw new Error('first run: set FLOWSTA_RELEASE_CLIENT_ID (register "Flowsta Release Tool" at dev.flowsta.com)');
   const require = createRequire(path.join(root, 'updater', 'package.json'));
-  const { hashFrom32AndType, encodeHashToBase64 } = require('holochain-client-07');
+  const { hashFrom32AndType, encodeHashToBase64, HoloHashType } = require('holochain-client-07');
   const raw = generateKeyPairSync('ed25519').publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
-  const appKey = encodeHashToBase64(hashFrom32AndType(raw, 'Agent'));
+  const appKey = encodeHashToBase64(hashFrom32AndType(raw, HoloHashType.Agent));
   console.log('linking the release tool with the Vault (approve it there)...');
   const r = await fetch(`${VAULT}/link-identity`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ app_name: 'Flowsta Release Tool', client_id: clientId, app_agent_pub_key: appKey }) });
   if (!r.ok) throw new Error(`link-identity refused: ${r.status} ${await r.text()}`);
