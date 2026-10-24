@@ -1,7 +1,7 @@
 /**
  * Is this conductor healthy after a change? Four checks, each with a reason:
  *   1. the admin websocket answers (within `adminWaitMs`)
- *   2. every app the manifest lists is installed and enabled
+ *   2. every expected app is present, and those that were running before are running now
  *   3. no panic in the container log since the change
  *   4. a gossip round completed in the last 10 minutes on some DNA that has
  *      peers (skipped, with a note, when no DNA has any peer yet)
@@ -25,7 +25,13 @@ export async function connectAdmin(url, { waitMs = 5 * 60 * 1000, holochain, cal
   throw new Error(`admin websocket ${url} did not answer: ${lastError?.message || lastError}`);
 }
 
-export async function verifyConductor({ adminUrl, holochain, expectedAppIds = [], docker, containerId, sinceUnix, gossipWaitMs = 10 * 60 * 1000, adminWaitMs, log = console.log }) {
+/**
+ * `expectedApps`: [{ id, running }] as listed on the conductor being replaced
+ * (plain id strings mean "must be running"). A disabled app stays disabled
+ * without failing the check; a missing one, or one that stopped, fails it.
+ */
+export async function verifyConductor({ adminUrl, holochain, expectedApps = [], docker, containerId, sinceUnix, gossipWaitMs = 10 * 60 * 1000, adminWaitMs, log = console.log }) {
+  const expected = expectedApps.map((a) => (typeof a === 'string' ? { id: a, running: true } : a));
   const checks = [];
   let admin;
   try { admin = await connectAdmin(adminUrl, { waitMs: adminWaitMs, holochain }); checks.push({ check: 'admin', ok: true }); }
@@ -33,9 +39,10 @@ export async function verifyConductor({ adminUrl, holochain, expectedAppIds = []
   try {
     const apps = await admin.listApps({});
     const byId = new Map(apps.map((a) => [a.installed_app_id, a]));
-    const missing = expectedAppIds.filter((id) => !byId.has(id));
-    const disabled = expectedAppIds.filter((id) => byId.has(id) && !isRunning(byId.get(id).status));
-    checks.push({ check: 'apps', ok: missing.length === 0 && disabled.length === 0, reason: [missing.length ? `missing ${missing.join(', ')}` : '', disabled.length ? `not running ${disabled.join(', ')}` : ''].filter(Boolean).join('; ') || undefined });
+    const missing = expected.filter((a) => !byId.has(a.id)).map((a) => a.id);
+    const stopped = expected.filter((a) => a.running && byId.has(a.id) && !isRunning(byId.get(a.id).status)).map((a) => a.id);
+    const few = (ids) => ids.length > 8 ? `${ids.slice(0, 8).join(', ')} and ${ids.length - 8} more` : ids.join(', ');
+    checks.push({ check: 'apps', ok: missing.length === 0 && stopped.length === 0, reason: [missing.length ? `missing ${few(missing)}` : '', stopped.length ? `stopped ${few(stopped)}` : ''].filter(Boolean).join('; ') || (expected.length ? `${expected.length} apps carried` : undefined) });
 
     if (docker && containerId) {
       const text = await docker.logs(containerId, { since: sinceUnix, tail: 2000 }).catch(() => '');
@@ -61,7 +68,7 @@ export async function verifyConductor({ adminUrl, holochain, expectedAppIds = []
   return { ok, checks };
 }
 
-function isRunning(status) {
+export function isRunning(status) {
   if (!status) return false;
   if (typeof status === 'string') return status === 'running' || status === 'enabled';
   return status.type === 'running' || status.type === 'enabled' || 'running' in status || 'enabled' in status;

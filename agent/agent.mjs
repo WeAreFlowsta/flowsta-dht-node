@@ -50,7 +50,7 @@ import { renderConductorConfig, carryOverFromConfig } from './lib/conductor-conf
 import { tarOfFile, filesOfTar } from './lib/tar.mjs';
 import { loadState, saveState, remember } from './lib/state.mjs';
 import { reconcileDnas } from './lib/dnas.mjs';
-import { verifyConductor, connectAdmin } from './lib/verify.mjs';
+import { verifyConductor, connectAdmin, isRunning } from './lib/verify.mjs';
 import { probeConductor } from '../updater/network-probe.mjs';
 
 const COMMUNITY_AUTH_MATERIAL = 'eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0=';
@@ -212,8 +212,8 @@ async function renameEvicting(id, name) {
   await docker.renameContainer(id, name);
 }
 
-async function verifyGeneration(gen, containerId, sinceUnix, { adminWaitMs, expectedAppIds = [] } = {}) {
-  return verifyConductor({ adminUrl: `ws://localhost:${gen.adminPort}`, holochain: gen.holochain, expectedAppIds, docker, containerId, sinceUnix, adminWaitMs, log });
+async function verifyGeneration(gen, containerId, sinceUnix, { adminWaitMs, expectedApps = [] } = {}) {
+  return verifyConductor({ adminUrl: `ws://localhost:${gen.adminPort}`, holochain: gen.holochain, expectedApps, docker, containerId, sinceUnix, adminWaitMs, log });
 }
 
 /** The apps a running conductor holds, so its replacement can be held to the same list. */
@@ -222,7 +222,7 @@ async function appsOf(adminPort, holochain) {
   try {
     admin = await connectAdmin(`ws://localhost:${adminPort}`, { waitMs: 20000, holochain });
     const apps = await admin.listApps({});
-    return apps.map((a) => a.installed_app_id);
+    return apps.map((a) => ({ id: a.installed_app_id, running: isRunning(a.status) }));
   } catch (e) {
     log(`could not list the running conductor's apps (${e.message}); the replacement is verified without them`);
     return [];
@@ -238,8 +238,8 @@ async function swapConductor(gen, oldContainer, { dataVolume, dataBind }, sequen
   log(`${gen.id}: ${reason}; replacing ${oldContainer.name} on ${dataBind || dataVolume}`);
   // What the old conductor holds is what the new one must hold: a conductor
   // that comes up empty beside the real data (a changed data path) fails here.
-  const expectedAppIds = oldContainer.running === false ? [] : await appsOf(gen.adminPort, gen.holochain);
-  if (expectedAppIds.length) log(`${gen.id}: the replacement must carry ${expectedAppIds.length} apps`);
+  const expectedApps = oldContainer.running === false ? [] : await appsOf(gen.adminPort, gen.holochain);
+  if (expectedApps.length) log(`${gen.id}: the replacement must carry ${expectedApps.length} apps (${expectedApps.filter((a) => a.running).length} running)`);
   try {
     await docker.pullImage(gen.image);
   } catch (e) {
@@ -256,7 +256,7 @@ async function swapConductor(gen, oldContainer, { dataVolume, dataBind }, sequen
   let newId;
   try {
     newId = await createConductor(gen, { dataVolume, dataBind }, sequence);
-    const verdict = await verifyGeneration(gen, newId, started, { expectedAppIds });
+    const verdict = await verifyGeneration(gen, newId, started, { expectedApps });
     if (!verdict.ok) throw new Error(`verification failed: ${verdict.checks.filter((c) => !c.ok).map((c) => `${c.check}: ${c.reason}`).join('; ')}`);
   } catch (e) {
     log(`${gen.id}: ROLLBACK (${e.message})`);
