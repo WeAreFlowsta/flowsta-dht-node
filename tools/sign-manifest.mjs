@@ -19,23 +19,62 @@
  * Release Tool" at dev.flowsta.com, put its client id in
  * FLOWSTA_RELEASE_CLIENT_ID, and the first run links it (one approval in the
  * Vault). The tool's origin is http://localhost:7331.
+ *
+ * The Vault's generic /sign refuses statements in the reserved `flowsta-`
+ * namespace (so no linked app can get a Flowsta protocol statement signed
+ * behind a byte-count dialog). Until the Vault has its own
+ * /sign-node-manifest route, whose dialog names the channel, sequence and
+ * digests, manifests are signed one of two ways:
+ *   - --local-key <file>   an Ed25519 key kept in that file (created on first
+ *                          use, mode 600). For the STAGING channel only: the
+ *                          staging API and the staging node are told to trust
+ *                          its DID (NODE_MANIFEST_SIGNER_DID / MANIFEST_SIGNER_DID).
+ *                          Refused for the stable channel: production manifests
+ *                          are signed by @weareflowsta in the Vault, nothing else.
+ *   --print-did <file>     print the DID of a local key and exit.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto';
 import { statementFor, verifyManifest, didToVerifyKey, DEFAULT_SIGNER_DID } from '../agent/lib/manifest.mjs';
 
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const require = createRequire(path.join(root, 'updater', 'package.json'));
+const { hashFrom32AndType, encodeHashToBase64, HoloHashType } = require('holochain-client-07');
+
+/** A 39-byte Holochain agent key, spelled `u` + base64url, from a raw Ed25519 verify key. */
+function agentKeyOf(raw32) { return encodeHashToBase64(hashFrom32AndType(raw32, HoloHashType.Agent)); }
+
+/** Load or create the local signing key (PKCS8 PEM, mode 600). */
+function localKey(file) {
+  let pem;
+  if (fs.existsSync(file)) pem = fs.readFileSync(file, 'utf8');
+  else {
+    pem = generateKeyPairSync('ed25519').privateKey.export({ format: 'pem', type: 'pkcs8' });
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, pem, { mode: 0o600 });
+    console.log(`created local signing key ${file}`);
+  }
+  const privateKey = createPrivateKey(pem);
+  const raw = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32);
+  return { privateKey, did: `did:flowsta:${agentKeyOf(raw)}` };
+}
+
 const args = process.argv.slice(2);
-const channel = args.find((a) => !a.startsWith('--'));
 const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : dflt; };
-if (!channel) { console.error('usage: sign-manifest.mjs <channel> [--sequence N] [--no-upload] [--api URL] [--vault URL]'); process.exit(2); }
+const optionValues = new Set(['--sequence', '--api', '--vault', '--local-key', '--print-did'].map((f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null; }));
+const channel = args.find((a) => !a.startsWith('--') && !optionValues.has(a));
+if (opt('print-did')) { console.log(localKey(opt('print-did')).did); process.exit(0); }
+if (!channel) { console.error('usage: sign-manifest.mjs <channel> [--sequence N] [--no-upload] [--api URL] [--vault URL] [--local-key FILE]\n       sign-manifest.mjs --print-did FILE'); process.exit(2); }
+const localKeyFile = opt('local-key');
+if (localKeyFile && channel === 'stable') { console.error('the stable channel is signed by @weareflowsta in the Vault only; --local-key is refused'); process.exit(2); }
 const API = (opt('api', process.env.FLOWSTA_API_URL || 'https://auth-api.flowsta.com')).replace(/\/$/, '');
 const VAULT = (opt('vault', 'http://localhost:27777')).replace(/\/$/, '');
 const ORIGIN = 'http://localhost:7331';
-const SIGNER_DID = process.env.MANIFEST_SIGNER_DID || DEFAULT_SIGNER_DID;
+const local = localKeyFile ? localKey(localKeyFile) : null;
+const SIGNER_DID = local ? local.did : (process.env.MANIFEST_SIGNER_DID || DEFAULT_SIGNER_DID);
 const upload = !args.includes('--no-upload');
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const bodyPath = path.join(root, 'manifest', `${channel}.json`);
 const body = JSON.parse(fs.readFileSync(bodyPath, 'utf8'));
 if (body.signature) throw new Error(`${bodyPath} must not carry a signature; it is the body`);
@@ -53,6 +92,11 @@ const manifest = { ...body, sequence, issued_at: new Date().toISOString() };
 const statement = statementFor(manifest);
 console.log(`channel ${channel} sequence ${sequence}\nstatement ${statement}`);
 
+let sigBytes;
+if (local) {
+  console.log(`signing with the local key as ${SIGNER_DID} (${channel} channel)`);
+  sigBytes = cryptoSign(null, Buffer.from(statement, 'utf8'), local.privateKey);
+} else {
 // The Vault signs for linked origins only.
 const status = await fetch(`${VAULT}/status`).then((r) => r.json()).catch(() => null);
 if (!status) throw new Error(`no Vault at ${VAULT}; open Flowsta Vault and unlock it`);
@@ -61,10 +105,8 @@ const linked = await fetch(`${VAULT}/link-status`, { headers: { Origin: ORIGIN }
 if (!linked.linked) {
   const clientId = process.env.FLOWSTA_RELEASE_CLIENT_ID;
   if (!clientId) throw new Error('first run: set FLOWSTA_RELEASE_CLIENT_ID (register "Flowsta Release Tool" at dev.flowsta.com)');
-  const require = createRequire(path.join(root, 'updater', 'package.json'));
-  const { hashFrom32AndType, encodeHashToBase64, HoloHashType } = require('holochain-client-07');
   const raw = generateKeyPairSync('ed25519').publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
-  const appKey = encodeHashToBase64(hashFrom32AndType(raw, HoloHashType.Agent));
+  const appKey = agentKeyOf(raw);
   console.log('linking the release tool with the Vault (approve it there)...');
   const r = await fetch(`${VAULT}/link-identity`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ app_name: 'Flowsta Release Tool', client_id: clientId, app_agent_pub_key: appKey }) });
   if (!r.ok) throw new Error(`link-identity refused: ${r.status} ${await r.text()}`);
@@ -77,7 +119,8 @@ const signRes = await fetch(`${VAULT}/sign`, {
 });
 if (!signRes.ok) throw new Error(`sign refused: ${signRes.status} ${await signRes.text()}`);
 const signed = await signRes.json();
-const sigBytes = /^[0-9a-f]{128}$/i.test(signed.signature) ? Buffer.from(signed.signature, 'hex') : Buffer.from(signed.signature, 'base64');
+sigBytes = /^[0-9a-f]{128}$/i.test(signed.signature) ? Buffer.from(signed.signature, 'hex') : Buffer.from(signed.signature, 'base64');
+}
 if (sigBytes.length !== 64) throw new Error(`unexpected signature length ${sigBytes.length}`);
 manifest.signature = { signer: SIGNER_DID, sig: sigBytes.toString('base64'), statement };
 
