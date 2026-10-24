@@ -1,72 +1,83 @@
-# Flowsta DHT Node
+# Flowsta Community Node
 #
-# Runs a Holochain conductor with auto-managed Flowsta DNAs.
-# Two containers:
-#   1. conductor — Flowsta's public Holochain 0.6.1/Iroh edge-node image
-#   2. sidecar   — DNA installer + auto-updater (Node.js)
-#   3. bootstrap-srv (optional, --profile bootstrap) — open
-#      bootstrap/signal/relay for network redundancy
+# One container you run; the rest the agent runs for you.
+#
+#   agent          pulls the signed node manifest from Flowsta, verifies the
+#                  signature against Team Flowsta's identity baked into the
+#                  image, and keeps this node at what the manifest says: one
+#                  Holochain conductor per generation (its own data volume,
+#                  admin port and bootstrap), the public DNAs each generation
+#                  lists, and the agent itself. Conductor changes happen in
+#                  your maintenance window and roll back if the new conductor
+#                  does not verify. Nothing is ever deleted.
+#   conductors     created by the agent as flowsta-conductor-<generation>
+#                  (for example flowsta-conductor-holochain-0.6 and
+#                  flowsta-conductor-holochain-0.7 while both lines run).
+#   bootstrap role (optional, --profile bootstrap) one open bootstrap/relay
+#                  server per generation behind an SNI pass-through proxy on
+#                  :443, each with its own hostname and certificate.
 #
 # Usage:
-#   docker compose up -d
-#
-# The sidecar waits for the conductor to be ready, installs all
-# bundled DNA hApp files, then polls the API for updates every 6 hours.
+#   docker compose up -d                       (existing nodes: add --remove-orphans)
+#   docker compose --profile bootstrap up -d   with the bootstrap role
 
 services:
-  conductor:
-    # Pinned by digest so every node runs the exact image Flowsta verified
-    # (tag hc0.6.1, Holochain 0.6.1 / Iroh). Override with CONDUCTOR_IMAGE only
-    # when Flowsta publishes a new one.
-    image: ${CONDUCTOR_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:900987b0daadd3fda65821c8855e06fac92398fe3872c53ac133bbfb1158d0f2}
-    container_name: flowsta-conductor
+  agent:
+    image: ${AGENT_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node:2.0.0}
+    container_name: flowsta-agent
     network_mode: host
     restart: unless-stopped
-    # Docker 29 starts processes at a 1024 open-file soft limit; a conductor
-    # opens several SQLite files per cell and panics under it as the network
-    # grows. memlock unlimited silences sqlcipher's mlock warnings.
-    ulimits:
-      nofile:
-        soft: 1048576
-        hard: 1048576
-      memlock: -1
-    volumes:
-      - conductor-data:/data
-      - ./conductor-config.yaml:/usr/local/share/holochain/conductor-config.template.yaml:ro
-    logging:
-      driver: json-file
-      options:
-        max-size: "100m"
-        max-file: "3"
-
-  sidecar:
-    build: .
-    image: flowsta-dht-node:latest
-    container_name: flowsta-sidecar
-    network_mode: host
-    restart: unless-stopped
-    depends_on:
-      - conductor
     environment:
-      - CONDUCTOR_URL=ws://localhost:4444
       - API_URL=${API_URL}
-      - NODE_SECRET=${NODE_SECRET}
-      - UPDATE_INTERVAL=${UPDATE_INTERVAL:-21600}
+      - CHANNEL=${CHANNEL:-stable}
       - NODE_LABEL=${NODE_LABEL:-}
+      - NODE_SECRET=${NODE_SECRET:-}
+      - UPDATE_WINDOW=${UPDATE_WINDOW:-03:00-05:00}
+      - SECURITY_UPDATES_ANYTIME=${SECURITY_UPDATES_ANYTIME:-1}
+      - TZ=${TZ:-UTC}
       - REPORT_INTERVAL=${REPORT_INTERVAL:-600}
       - REPORT_DISABLED=${REPORT_DISABLED:-0}
+      - BOOTSTRAP_AUTH_MATERIAL=${BOOTSTRAP_AUTH_MATERIAL:-}
+      - RELAY_AUTH_MATERIAL=${RELAY_AUTH_MATERIAL:-}
+      - AGENT_CONTAINER_NAME=flowsta-agent
+    volumes:
+      # The agent manages the conductor containers through Docker. This is
+      # root on the host; the agent only acts on a manifest signed by Flowsta.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent-state:/state
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
 
-  # Optional: open bootstrap/signal/relay server for network redundancy.
-  # Requires a publicly reachable address + TLS certs (see README).
-  # Start with: docker compose --profile bootstrap up -d
-  bootstrap-srv:
-    image: ghcr.io/holochain/kitsune2_bootstrap_srv:v0.4.1
-    container_name: flowsta-bootstrap-srv
+  # ── Optional bootstrap role ─────────────────────────────────────────────
+  # One SNI pass-through proxy on :443 in front of one bootstrap server per
+  # Holochain generation. Each server terminates its own TLS with its own
+  # Let's Encrypt certificate: TLS_DOMAIN (0.6 line, kitsune2 0.4.x clients)
+  # and TLS_DOMAIN_07 (0.7 line, kitsune2 0.5.x clients). The proxy reads
+  # only the hostname in the TLS hello and passes the bytes through; it
+  # goes away when the 0.6 generation retires.
+  bootstrap-proxy:
+    image: haproxy:3.0-alpine
+    container_name: flowsta-bootstrap-proxy
+    network_mode: host
+    restart: unless-stopped
+    profiles: ["bootstrap"]
+    environment:
+      - TLS_DOMAIN=${TLS_DOMAIN}
+      - TLS_DOMAIN_07=${TLS_DOMAIN_07:-}
+    volumes:
+      - ./bootstrap/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  bootstrap-srv-06:
+    image: ${BOOTSTRAP_IMAGE_06:-ghcr.io/holochain/kitsune2_bootstrap_srv:v0.4.1}
+    container_name: flowsta-bootstrap-srv-06
     network_mode: host
     restart: unless-stopped
     profiles: ["bootstrap"]
@@ -74,17 +85,37 @@ services:
       - "kitsune2-bootstrap-srv"
       - "--production"
       - "--listen"
-      - "[::]:443"
+      - "127.0.0.1:8443"
       - "--tls-cert"
       - "/etc/letsencrypt/live/${TLS_DOMAIN}/fullchain.pem"
       - "--tls-key"
       - "/etc/letsencrypt/live/${TLS_DOMAIN}/privkey.pem"
       # No --authentication-hook-server: community bootstrap is OPEN by
-      # design — it is the network's fallback when the gated primary is
-      # unreachable. bootstrap-srv's built-in rate limiting applies.
+      # design, the network's fallback when the gated primary is unreachable.
     volumes:
-      # Mount the whole letsencrypt tree: live/ contains symlinks into
-      # archive/, so mounting live/<domain> alone gives dangling links.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  bootstrap-srv-07:
+    image: ${BOOTSTRAP_IMAGE_07:-ghcr.io/holochain/kitsune2_bootstrap_srv:v0.5.1}
+    container_name: flowsta-bootstrap-srv-07
+    network_mode: host
+    restart: unless-stopped
+    profiles: ["bootstrap-07"]
+    command:
+      - "kitsune2-bootstrap-srv"
+      - "--production"
+      - "--listen"
+      - "127.0.0.1:8444"
+      - "--tls-cert"
+      - "/etc/letsencrypt/live/${TLS_DOMAIN_07}/fullchain.pem"
+      - "--tls-key"
+      - "/etc/letsencrypt/live/${TLS_DOMAIN_07}/privkey.pem"
+    volumes:
       - /etc/letsencrypt:/etc/letsencrypt:ro
     logging:
       driver: json-file
@@ -93,4 +124,4 @@ services:
         max-file: "3"
 
 volumes:
-  conductor-data:
+  agent-state:

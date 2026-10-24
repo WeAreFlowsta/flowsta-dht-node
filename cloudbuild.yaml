@@ -1,134 +1,28 @@
-# Cloud Build pipeline for pre-compiled Flowsta DHT Node images.
+# Cloud Build: the Flowsta node agent image.
 #
-# Builds two images:
-# 1. Conductor image with pre-compiled WASM cache (no compilation on target)
-# 2. Sidecar image with bundled hApp files + auto-updater
+# Builds the Dockerfile in this directory (agent + public hApp bundles) and
+# pushes it to the public Artifact Registry repo, tagged with the version.
+# The node manifest pins the agent by DIGEST; copy it from the build output.
 #
 # Usage:
-#   gcloud builds submit --config=cloudbuild.yaml --project=YOUR_PROJECT_ID
+#   gcloud builds submit --config=cloudbuild.yaml \
+#     --substitutions=_VERSION=2.0.0 --project=flowsta-475001
+
+substitutions:
+  _VERSION: 'dev'
+  _REPO: 'us-docker.pkg.dev/flowsta-475001/public'
 
 steps:
-  # Step 1: Build the sidecar image (contains hApp files + installer)
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'build-sidecar', '.']
-
-  # Step 2: Pull the upstream conductor image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['pull', 'ghcr.io/holo-host/edgenode:v0.0.7ga.5-hc0.6.0-go-pion-dev']
-
-  # Step 3: Create conductor config for the build
-  - name: 'ubuntu'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        cat > /workspace/build-conductor-config.yaml << 'EOF'
-        admin_interfaces:
-        - driver:
-            type: websocket
-            port: 4444
-            allowed_origins: '*'
-        network:
-          bootstrap_url: "https://bootstrap.flowsta.com"
-          signal_url: "wss://bootstrap.flowsta.com"
-          enable_mdns: false
-        data_root_path: "/data/holochain"
-        keystore:
-          type: lair_server_in_proc
-          lair_root: "/data/holochain/ks"
-        tracing_override: "error"
-        EOF
-
-  # Step 4: Start conductor, install DNAs, extract WASM cache
-  - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        set -e
-
-        # Create volume and start conductor
-        docker volume create build-conductor-data
-        docker run -d \
-          --name build-conductor \
-          --network host \
-          -v build-conductor-data:/data \
-          -v /workspace/build-conductor-config.yaml:/usr/local/share/holochain/conductor-config.template.yaml:ro \
-          ghcr.io/holo-host/edgenode:v0.0.7ga.5-hc0.6.0-go-pion-dev
-
-        # Wait for conductor
-        echo "Waiting for conductor..."
-        for i in $(seq 1 60); do
-          if docker run --rm --network host --entrypoint node build-sidecar \
-            -e "
-              import('@holochain/client').then(async ({AdminWebsocket}) => {
-                try {
-                  const a = await AdminWebsocket.connect({url: new URL('ws://localhost:4444'), wsClientOptions: {origin: 'build'}});
-                  await a.listApps({});
-                  await a.client.close();
-                  process.exit(0);
-                } catch { process.exit(1); }
-              });
-            " 2>/dev/null; then
-            echo "Conductor ready"
-            break
-          fi
-          sleep 2
-        done
-
-        # Install all DNAs (override entrypoint to run installer directly)
-        echo "Installing DNAs..."
-        docker run --rm \
-          --name build-installer \
-          --network host \
-          --entrypoint node \
-          -e CONDUCTOR_URL=ws://localhost:4444 \
-          build-sidecar \
-          /app/install-bundled-dnas.mjs
-
-        # Stop conductor
-        docker stop build-conductor
-        docker rm build-conductor
-
-        # Extract WASM cache
-        echo "Extracting WASM cache..."
-        docker run --rm \
-          -v build-conductor-data:/data \
-          -v /workspace:/output \
-          alpine sh -c "
-            if [ -d /data/holochain/databases/wasm ]; then
-              tar czf /output/precompiled-data.tar.gz -C /data holochain/databases/wasm
-              echo 'WASM cache size:' && du -sh /output/precompiled-data.tar.gz
-            else
-              echo 'ERROR: No WASM cache found'
-              find /data -name '*.sqlite*' 2>/dev/null
-              exit 1
-            fi
-          "
-
-        docker volume rm build-conductor-data
-
-  # Step 5: Build the pre-compiled conductor image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
-      - '-f'
-      - 'Dockerfile.precompiled'
+      - '--build-arg'
+      - 'AGENT_VERSION=${_VERSION}'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/flowsta-dht-conductor:latest'
+      - '${_REPO}/flowsta-dht-node:${_VERSION}'
       - '.'
 
-  # Step 6: Tag the sidecar image
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'tag'
-      - 'build-sidecar'
-      - 'gcr.io/$PROJECT_ID/flowsta-dht-node:latest'
-
 images:
-  - 'gcr.io/$PROJECT_ID/flowsta-dht-conductor:latest'
-  - 'gcr.io/$PROJECT_ID/flowsta-dht-node:latest'
+  - '${_REPO}/flowsta-dht-node:${_VERSION}'
 
-timeout: '1800s'
-options:
-  machineType: 'E2_HIGHCPU_8'
+timeout: '900s'

@@ -1,31 +1,28 @@
-# Flowsta DHT Node — Installer/Updater Sidecar
+# Flowsta node agent image.
 #
-# This image contains the DNA installer and auto-updater scripts.
-# It runs alongside the Holochain conductor container using --network host
-# to access the conductor's admin WebSocket.
+# Runs beside Docker on the node and manages the conductor containers from
+# the signed node manifest (see agent/agent.mjs). Carries the public hApp
+# bundles so a fresh node installs them without a download.
 #
-# The conductor itself uses the upstream edge node image unchanged.
-# This sidecar handles DNA installation on first boot and auto-updates.
-#
-# See docker-compose.yml or README.md for full setup.
+# Published as us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node:<version>;
+# the manifest pins it by digest.
 
-FROM node:20-slim
+FROM node:22-slim
+
+ARG AGENT_VERSION=dev
+ENV AGENT_VERSION=${AGENT_VERSION} \
+    NODE_ENV=production
 
 WORKDIR /app
 
-# Copy updater dependencies and install
 COPY updater/package.json updater/package-lock.json* ./
-RUN npm install --production
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
-# Copy scripts
-COPY install-bundled-dnas.mjs ./
-COPY updater/dht-update.mjs updater/network-probe.mjs updater/network-report.mjs ./updater/
-
-# Copy bundled hApp files
+COPY updater/network-probe.mjs ./updater/network-probe.mjs
+COPY agent/ ./agent/
 COPY happs/ ./happs/
 
-# Copy entrypoint
-COPY entrypoint-sidecar.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh
+LABEL org.flowsta.component="node-agent" \
+      org.flowsta.version="${AGENT_VERSION}"
 
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["node", "/app/agent/agent.mjs"]

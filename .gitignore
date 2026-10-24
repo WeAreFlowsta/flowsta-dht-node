@@ -1,3 +1,3 @@
-node_modules/
-*.happ
 conductor-config.yaml
+*.happ
+node_modules/
