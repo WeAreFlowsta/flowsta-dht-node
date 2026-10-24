@@ -400,9 +400,12 @@ async function upkeep(desired, observed) {
     if (dnas.length === 0) continue;
     let admin;
     try {
-      admin = await connectAdmin(`ws://localhost:${gen.adminPort}`, { waitMs: 15000, holochain: gen.holochain });
+      // Installing or enabling a DNA compiles its wasm; on a small box that
+      // is minutes, so this client waits up to 15.
+      admin = await connectAdmin(`ws://localhost:${gen.adminPort}`, { waitMs: 15000, holochain: gen.holochain, callTimeoutMs: 15 * 60 * 1000 });
       const r = await reconcileDnas(admin, dnas, { happsDir: cfg.happsDir, downloadDir: `/tmp/flowsta-agent-${gen.id}`, log });
       if (r.installed.length) { remember(state, { event: 'dnas_installed', generation: gen.id, apps: r.installed }); persist(); }
+      if (r.enabled.length) { remember(state, { event: 'dnas_enabled', generation: gen.id, apps: r.enabled }); persist(); }
       for (const f of r.failed) log(`${gen.id}: DNA ${f.app_id} not installed: ${f.reason}`);
     } catch (e) {
       log(`${gen.id}: upkeep skipped (${e.message})`);

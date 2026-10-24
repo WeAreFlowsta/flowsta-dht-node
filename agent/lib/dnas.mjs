@@ -16,9 +16,25 @@ async function download(url, dest) {
 
 export async function reconcileDnas(admin, dnas, { happsDir = '/app/happs', downloadDir = '/tmp/flowsta-agent-dnas', log = console.log } = {}) {
   const apps = await admin.listApps({});
-  const installed = new Set(apps.map((a) => a.installed_app_id));
-  const missing = dnas.filter((d) => !installed.has(d.app_id));
-  const result = { installed: [], failed: [] };
+  const byId = new Map(apps.map((a) => [a.installed_app_id, a]));
+  const result = { installed: [], enabled: [], failed: [] };
+  // An app that is installed but not running (a first enable that was cut
+  // short, a conductor restart mid-compile) is enabled again. The call can
+  // take minutes on a small box while the wasm compiles; the admin client's
+  // timeout is the caller's to set.
+  for (const d of dnas) {
+    const app = byId.get(d.app_id);
+    if (app && !isRunning(app.status)) {
+      try {
+        await admin.enableApp({ installed_app_id: d.app_id });
+        result.enabled.push(d.app_id);
+        log(`  enabled ${d.app_id}`);
+      } catch (e) {
+        result.failed.push({ app_id: d.app_id, reason: `enable: ${e.message || e}` });
+      }
+    }
+  }
+  const missing = dnas.filter((d) => !byId.has(d.app_id));
   if (missing.length === 0) return result;
   const agentKey = apps.length > 0 ? apps[0].agent_pub_key : await admin.generateAgentPubKey();
   fs.mkdirSync(downloadDir, { recursive: true });
@@ -48,3 +64,9 @@ export async function reconcileDnas(admin, dnas, { happsDir = '/app/happs', down
 }
 
 export function sha256(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
+
+function isRunning(status) {
+  if (!status) return false;
+  if (typeof status === 'string') return status === 'running' || status === 'enabled';
+  return status.type === 'running' || status.type === 'enabled' || 'running' in status || 'enabled' in status;
+}
