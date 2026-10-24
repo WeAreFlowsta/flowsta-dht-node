@@ -23,7 +23,7 @@
 
 services:
   agent:
-    image: ${AGENT_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node:2.0.2}
+    image: ${AGENT_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node:2.0.3}
     container_name: flowsta-agent
     network_mode: host
     restart: unless-stopped
