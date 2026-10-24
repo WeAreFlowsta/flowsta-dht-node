@@ -32,6 +32,7 @@
  *   STATE_DIR                 default /state
  *   STATUS_PORT               local status page on 127.0.0.1 (default 8787; 0 = off)
  *   TICK_SECONDS / REPORT_INTERVAL    default 60 / 600
+ *   DRY_RUN                   1 = plan and log, change nothing (no container, DNA or advisory action)
  */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -71,6 +72,7 @@ const cfg = {
   reportMs: Number(env.REPORT_INTERVAL || 600) * 1000,
   happsDir: env.HAPPS_DIR || '/app/happs',
   version: env.AGENT_VERSION || 'dev',
+  dryRun: env.DRY_RUN === '1',
 };
 if (!cfg.apiUrl) { console.error('API_URL is required'); process.exit(1); }
 
@@ -411,6 +413,13 @@ async function tick() {
     const isWindow = inWindow(new Date(), cfg.window);
     const securityNow = cfg.securityAnytime && (manifest.advisories || []).some((a) => a.severity === 'security' && a.action === 'update' && !state.advisories_applied.includes(a.id));
     const results = []; const waiting = [];
+    if (cfg.dryRun) {
+      log(`DRY RUN: ${actions.length ? actions.map((a) => `${a.type} ${a.generation || a.image || ''} [${a.disruptive ? 'window' : 'any time'}] (${a.reason})`).join('; ') : 'nothing to do'}`);
+      if (observed.legacy) log(`DRY RUN: legacy conductor ${observed.legacy.name} (${observed.legacy.running ? 'running' : 'stopped'}) on ${JSON.stringify(legacyDataMount(observed.legacy.inspect))}`);
+      current = { manifest, actions: [], waiting: actions, lastTick: new Date().toISOString(), lastError: null };
+      if (Date.now() - lastReportAt >= cfg.reportMs) { await report(desired, observed); lastReportAt = Date.now(); }
+      return;
+    }
     for (const action of actions) {
       const allowed = !action.disruptive || isWindow || securityNow;
       if (!allowed) { waiting.push(action); continue; }
@@ -454,7 +463,7 @@ function statusServer() {
 // ── main ─────────────────────────────────────────────────────────────────────
 
 const v = await docker.version().catch((e) => { console.error(`cannot talk to Docker at ${docker.socketPath}: ${e.message}`); process.exit(1); });
-log(`flowsta node agent ${cfg.version} on Docker ${v.Version}; channel ${cfg.channel}; label ${cfg.label}; trusting ${cfg.signerDid}`);
+log(`flowsta node agent ${cfg.version} on Docker ${v.Version}; channel ${cfg.channel}; label ${cfg.label}; trusting ${cfg.signerDid}${cfg.dryRun ? '; DRY RUN' : ''}`);
 fs.mkdirSync(cfg.stateDir, { recursive: true });
 statusServer();
 await retirePreviousAgent();

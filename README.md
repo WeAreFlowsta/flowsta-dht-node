@@ -218,6 +218,8 @@ Create a `.env` file in the repo root:
 | `REPORT_DISABLED` | No | `0` | Set `1` to send no health reports |
 | `BOOTSTRAP_AUTH_MATERIAL`, `RELAY_AUTH_MATERIAL` | No | community client id | Bootstrap/relay auth material in the rendered conductor configs |
 | `AGENT_IMAGE` | No | the published agent image | Only for developing the agent itself |
+| `DRY_RUN` | No | `0` | Set `1` to plan and log only; the agent changes nothing. Useful for the first start on an existing node |
+| `MANIFEST_SIGNER_DID` | No | Team Flowsta's DID | Only for Flowsta's own test channels |
 
 **Networks:** the `stable` channel joins the **production** network, the
 only network community nodes should join. (Flowsta operates separate
