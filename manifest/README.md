@@ -1,6 +1,6 @@
 # Node manifests
 
-One body per channel (`stable.json`, `staging.json`, later `proofpoll.json`): what every node on that channel should run. `tools/sign-manifest.mjs <channel>` stamps `issued_at` and the next `sequence`, has the Vault sign the statement with Team Flowsta's identity, verifies the result with the node agent's own code, writes `<channel>.signed.json` (not committed) and publishes it through the API. Nodes accept a manifest only with that signature.
+One body per channel (`stable.json`, `staging.json`, later `proofpoll.json`): what every node on that channel should run. `tools/sign-manifest.mjs <channel>` stamps `issued_at` and the next `sequence`, has the Vault sign the statement with Team Flowsta's identity, verifies the result with the node agent's own code, writes `<channel>.signed.json` (not committed) and publishes it through the API, which accepts it on the strength of the signature alone (no session: nobody but that identity can produce a newer manifest). Nodes accept a manifest only with that signature.
 
 Rules the agent enforces (see `agent/lib/manifest.mjs`): images pinned by digest; one admin port per generation; generation states `serving` | `retiring` | `retired`; a `retired` generation's conductor stops and its data volume stays; a lower or equal sequence is never applied.
 
