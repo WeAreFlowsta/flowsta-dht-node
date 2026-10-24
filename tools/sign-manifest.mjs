@@ -20,11 +20,10 @@
  * FLOWSTA_RELEASE_CLIENT_ID, and the first run links it (one approval in the
  * Vault). The tool's origin is http://localhost:7331.
  *
- * The Vault's generic /sign refuses statements in the reserved `flowsta-`
- * namespace (so no linked app can get a Flowsta protocol statement signed
- * behind a byte-count dialog). Until the Vault has its own
- * /sign-node-manifest route, whose dialog names the channel, sequence and
- * digests, manifests are signed one of two ways:
+ * The Vault signs through POST /sign-node-manifest (Vault 1.7.0+): it derives
+ * the statement from the manifest itself and shows the channel, sequence,
+ * generations, digests and advisories before signing. (Its generic /sign
+ * refuses `flowsta-` statements by design.) Two more modes:
  *   - --local-key <file>   an Ed25519 key kept in that file (created on first
  *                          use, mode 600). For the STAGING channel only: the
  *                          staging API and the staging node are told to trust
@@ -112,13 +111,16 @@ if (!linked.linked) {
   if (!r.ok) throw new Error(`link-identity refused: ${r.status} ${await r.text()}`);
 }
 
-console.log('asking the Vault to sign (approve it there)...');
-const signRes = await fetch(`${VAULT}/sign`, {
+console.log('asking the Vault to sign (approve it there; check the channel, sequence and digests against the lines above)...');
+const signRes = await fetch(`${VAULT}/sign-node-manifest`, {
   method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
-  body: JSON.stringify({ type: 'bytes', bytes: Buffer.from(statement, 'utf8').toString('base64'), reason: `Sign node manifest ${channel} #${sequence}` }),
+  body: JSON.stringify({ manifest }),
 });
 if (!signRes.ok) throw new Error(`sign refused: ${signRes.status} ${await signRes.text()}`);
 const signed = await signRes.json();
+// The Vault derived the statement itself; it must be the one computed here.
+if (signed.statement !== statement) throw new Error(`the Vault signed a different statement:\n  vault ${signed.statement}\n  here  ${statement}`);
+if (signed.signer_did && signed.signer_did !== SIGNER_DID) console.warn(`note: the Vault's identity is ${signed.signer_did}, expected ${SIGNER_DID}`);
 sigBytes = /^[0-9a-f]{128}$/i.test(signed.signature) ? Buffer.from(signed.signature, 'hex') : Buffer.from(signed.signature, 'base64');
 }
 if (sigBytes.length !== 64) throw new Error(`unexpected signature length ${sigBytes.length}`);
