@@ -14,7 +14,14 @@ export function holochainLine(version) {
   return `${m[1]}.${m[2]}`;
 }
 
-export function renderConductorConfig(generation, { authBootstrap, authRelay, tracing = 'info,kitsune2=info', dataRoot = '/data/holochain' }) {
+/**
+ * `dataRoot` and `lairRoot` are where the conductor's data lives inside the
+ * container. They are carried over from an adopted conductor's config and
+ * must never change for a running generation: a different path is an empty
+ * conductor beside the real data, and nothing but the path would tell.
+ */
+export function renderConductorConfig(generation, { authBootstrap, authRelay, tracing = 'info,kitsune2=info', dataRoot = '/data/holochain', lairRoot }) {
+  lairRoot ||= `${dataRoot}/ks`;
   const line = holochainLine(generation.holochain);
   const host = generation.bootstrap.url.replace(/^https:\/\//, '').replace(/\/+$/, '');
   const yamlStr = (s) => JSON.stringify(String(s));
@@ -42,7 +49,7 @@ export function renderConductorConfig(generation, { authBootstrap, authRelay, tr
   if (authRelay) lines.push(`  base64_auth_material_relay: ${yamlStr(authRelay)}`);
   lines.push('  report: !json_lines', '    days_retained: 30', '    fetched_op_interval_s: 300', '');
   lines.push(`data_root_path: ${yamlStr(dataRoot)}`, '');
-  lines.push('keystore:', '  type: lair_server_in_proc', `  lair_root: ${yamlStr(`${dataRoot}/ks`)}`, '');
+  lines.push('keystore:', '  type: lair_server_in_proc', `  lair_root: ${yamlStr(lairRoot)}`, '');
   if (line !== '0.6') lines.push('db_sync_level: Normal', '');
   lines.push(`tracing_override: ${yamlStr(tracing)}`, '');
   return lines.join('\n');
@@ -58,5 +65,7 @@ export function carryOverFromConfig(yamlText) {
     authBootstrap: grab('base64_auth_material_bootstrap'),
     authRelay: grab('base64_auth_material_relay'),
     tracing: grab('tracing_override'),
+    dataRoot: grab('data_root_path')?.replace(/^'|'$/g, ''),
+    lairRoot: grab('lair_root')?.replace(/^'|'$/g, ''),
   };
 }

@@ -25,6 +25,8 @@
  *   BOOTSTRAP_AUTH_MATERIAL / RELAY_AUTH_MATERIAL   auth material for the conductor configs
  *                             (default: carried over from the adopted conductor, else the community client id)
  *   TRACING_OVERRIDE          conductor tracing (default info,kitsune2=info)
+ *   CONDUCTOR_DATA_ROOT       data_root_path inside the conductor container; default: carried over from the
+ *                             adopted conductor, else /data/holochain. Never change it for a running generation.
  *   LEGACY_CONDUCTOR_NAMES    containers the agent may adopt (default flowsta-conductor,holochain-conductor)
  *   LEGACY_DATA_VOLUMES       volumes of an already-removed conductor the agent may adopt
                              (default flowsta-dht-node_conductor-data,holochain-data,holochain-conductor-data)
@@ -154,10 +156,11 @@ async function authMaterial(legacy) {
       const files = filesOfTar(tar);
       const text = Object.values(files)[0]?.toString('utf8') || '';
       const carried = carryOverFromConfig(text);
-      auth = { authBootstrap: auth.authBootstrap || carried.authBootstrap, authRelay: auth.authRelay || carried.authRelay, tracing: auth.tracing || carried.tracing };
-      log('carried auth material and tracing over from the existing conductor config');
+      auth = { authBootstrap: auth.authBootstrap || carried.authBootstrap, authRelay: auth.authRelay || carried.authRelay, tracing: auth.tracing || carried.tracing, dataRoot: carried.dataRoot, lairRoot: carried.lairRoot };
+      log(`carried auth material, tracing and the data path (${carried.dataRoot || '/data/holochain'}) over from the existing conductor config`);
     } catch (e) { log(`could not read the existing conductor config (${e.message}); using the community client id`); }
   }
+  if (env.CONDUCTOR_DATA_ROOT) auth.dataRoot = env.CONDUCTOR_DATA_ROOT;
   auth.authBootstrap ||= COMMUNITY_AUTH_MATERIAL;
   auth.authRelay ||= auth.authBootstrap;
   auth.tracing ||= 'info,kitsune2=info';

@@ -101,9 +101,16 @@ test('conductor config: 0.6 keeps signal_url, 0.7 has none and carries request_t
   for (const c of [c6, c7]) { assert.match(c, /lair_server_in_proc/); assert.match(c, /base64_auth_material_bootstrap: "AAA"/); }
 });
 
-test('carry-over reads auth material and tracing from a hand-written config', () => {
+test('carry-over reads auth material, tracing and the data path from a hand-written config', () => {
   const yaml = 'network:\n  bootstrap_url: "https://b"\n  base64_auth_material_bootstrap: "eyJjIn0="\n  base64_auth_material_relay: "eyJyIn0="\n\ntracing_override: "info,kitsune2=info"\n';
-  assert.deepEqual(carryOverFromConfig(yaml), { authBootstrap: 'eyJjIn0=', authRelay: 'eyJyIn0=', tracing: 'info,kitsune2=info' });
+  assert.deepEqual(carryOverFromConfig(yaml), { authBootstrap: 'eyJjIn0=', authRelay: 'eyJyIn0=', tracing: 'info,kitsune2=info', dataRoot: undefined, lairRoot: undefined });
+  const upstreamShape = 'data_root_path: /var/local/lib/holochain\nkeystore:\n  type: lair_server_in_proc\n  lair_root: /var/local/lib/holochain/ks\n';
+  const c = carryOverFromConfig(upstreamShape);
+  assert.equal(c.dataRoot, '/var/local/lib/holochain');
+  assert.equal(c.lairRoot, '/var/local/lib/holochain/ks');
+  const rendered = renderConductorConfig({ id: 'g', holochain: '0.6.1', conductor: { admin_port: 4444 }, bootstrap: { url: 'https://b.example' } }, { dataRoot: c.dataRoot, lairRoot: c.lairRoot });
+  assert.match(rendered, /data_root_path: "\/var\/local\/lib\/holochain"/);
+  assert.match(rendered, /lair_root: "\/var\/local\/lib\/holochain\/ks"/);
 });
 
 test('tar round trip: one file in, the same file out', () => {
