@@ -11,13 +11,13 @@ import { probeConductor } from '../../updater/network-probe.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function connectAdmin(url, { waitMs = 5 * 60 * 1000, holochain } = {}) {
+export async function connectAdmin(url, { waitMs = 5 * 60 * 1000, holochain, callTimeoutMs = 120000 } = {}) {
   const { AdminWebsocket } = await clientFor(holochain);
   const until = Date.now() + waitMs;
   let lastError;
   while (Date.now() < until) {
     try {
-      const admin = await AdminWebsocket.connect({ url: new URL(url), wsClientOptions: { origin: 'flowsta-agent' }, defaultTimeout: 120000 });
+      const admin = await AdminWebsocket.connect({ url: new URL(url), wsClientOptions: { origin: 'flowsta-agent' }, defaultTimeout: callTimeoutMs });
       await admin.listApps({});
       return admin;
     } catch (e) { lastError = e; await sleep(5000); }

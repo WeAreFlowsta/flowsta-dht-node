@@ -380,7 +380,9 @@ async function report(desired, observed) {
     if (!c) continue;
     let admin;
     try {
-      admin = await connectAdmin(`ws://localhost:${gen.adminPort}`, { waitMs: 15000, holochain: gen.holochain });
+      // A conductor with many cells answers dump_network_metrics slowly, and
+      // slowest in the minutes after a start; the report is not worth failing over.
+      admin = await connectAdmin(`ws://localhost:${gen.adminPort}`, { waitMs: 15000, holochain: gen.holochain, callTimeoutMs: 10 * 60 * 1000 });
       const base = await probeConductor(admin, { label: cfg.label, software: { agent: 'flowsta-agent', version: cfg.version } });
       const g = state.generations[gen.id] || {};
       const body = { ...base, generation: gen.id, holochain: gen.holochain, conductor_digest: (c.image.split('@')[1] || null), agent_digest: (observed.agentImage?.split('@')[1] || null), manifest_sequence: state.manifest_sequence, last_change: g.lastChange || null, last_rollback: g.lastRollback || null, advisories_applied: state.advisories_applied.slice(-20) };
