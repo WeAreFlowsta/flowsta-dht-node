@@ -55,11 +55,24 @@ docker compose up -d
 </details>
 
 **Upgrading a node from the previous version** (sidecar + compose-managed
-conductor): `git pull && docker compose up -d --remove-orphans`. The old
-conductor container goes; its data volume stays and the agent creates
-the new conductor on it within a minute. A few minutes offline, no
-data lost. If you had edited `conductor-config.yaml`, the agent carries
-your auth material over; everything else it renders from the manifest.
+conductor), in two steps so the agent can read your running conductor
+before anything is removed:
+
+```bash
+git pull && docker compose up -d agent
+docker logs -f flowsta-agent        # wait for "now on sha256:…" (about a minute)
+docker compose up -d --remove-orphans              # add --profile bootstrap if you run that role
+```
+
+The agent adopts the running conductor: it carries your auth material
+and data path over from its config, stops it, creates the new conductor
+on the same data volume, verifies that every app came across (and rolls
+back if not), then removes the old container. The second command removes
+the old sidecar (and, with the bootstrap profile, replaces the old
+bootstrap server with the proxy and the per-generation servers). A
+minute offline, no data lost. If the old conductor was already gone, the
+agent still finds its data volume, but then renders the config from
+defaults instead of carrying yours over.
 
 ## What you're signing up for
 
