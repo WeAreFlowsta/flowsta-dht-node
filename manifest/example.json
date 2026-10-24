@@ -1,0 +1,43 @@
+{
+  "v": 1,
+  "channel": "staging",
+  "issued_at": "2026-10-24T12:00:00Z",
+  "sequence": 1,
+  "generations": [
+    {
+      "id": "holochain-0.6",
+      "state": "serving",
+      "holochain": "0.6.1",
+      "adopts_legacy_conductor": true,
+      "conductor": {
+        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:900987b0daadd3fda65821c8855e06fac92398fe3872c53ac133bbfb1158d0f2",
+        "admin_port": 4444
+      },
+      "bootstrap": { "url": "https://bootstrap.flowsta.com" },
+      "dnas": [
+        { "app_id": "flowsta_identity_v1_4", "sha256": "<sha256 of flowsta_identity_v1_4_happ.happ>", "url": "https://auth-api.flowsta.com/api/v1/vault/node/dna-bundle/identity/1.4" },
+        { "app_id": "flowsta_signing_v1_4", "sha256": "<sha256 of flowsta_signing_v1_4_happ.happ>", "url": "https://auth-api.flowsta.com/api/v1/vault/node/dna-bundle/signing/1.4" }
+      ]
+    },
+    {
+      "id": "holochain-0.7",
+      "state": "serving",
+      "holochain": "0.7.1",
+      "conductor": {
+        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:<digest of the hc0.7.1 build>",
+        "admin_port": 4445
+      },
+      "bootstrap": { "url": "https://bootstrap-7.flowsta.com" },
+      "dnas": []
+    }
+  ],
+  "agent": { "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:<digest of the agent image>" },
+  "advisories": [
+    { "id": "2026-10-two-generations", "severity": "routine", "action": "notice", "text": "Two Holochain lines run side by side until the 0.6 generation retires. Your 0.6 data stays where it is." }
+  ],
+  "signature": {
+    "signer": "did:flowsta:uhCAkWuA-Ehm9EVzcsPE2Wo_vpc9ImljHN8NMMEXpbtG5BdooOV9a",
+    "sig": "<base64 Ed25519 signature of the statement, made in the Vault>",
+    "statement": "flowsta-node-manifest:v1:staging:1:<sha256 of the canonical JSON of this document without the signature member>"
+  }
+}

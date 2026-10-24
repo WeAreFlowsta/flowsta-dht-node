@@ -1,11 +1,17 @@
-# Cloud Build — Flowsta edge node base image (Holochain 0.6.1 stable).
+# Cloud Build: the Flowsta edge node image for one Holochain version.
 #
-# Builds the binary-swap image defined in Dockerfile.edgenode: Holo Host's
-# edge node with the conductor binary overlaid from the holochain-0.6.1
-# stable release.
+# Builds Dockerfile.edgenode (Holo Host's edge node + the official conductor
+# binary) and pushes it to the public Artifact Registry repo. The node
+# manifest pins the image by DIGEST: read it from the build output
+# ("digest: sha256:...") or `gcloud artifacts docker images describe`.
 #
 # Usage:
-#   gcloud builds submit --config=cloudbuild-edgenode.yaml --project=flowsta-475001
+#   gcloud builds submit --config=cloudbuild-edgenode.yaml \
+#     --substitutions=_HOLOCHAIN_VERSION=0.7.1 --project=flowsta-475001
+
+substitutions:
+  _HOLOCHAIN_VERSION: '0.6.1'
+  _REPO: 'us-docker.pkg.dev/flowsta-475001/public'
 
 steps:
   - name: 'gcr.io/cloud-builders/docker'
@@ -13,11 +19,13 @@ steps:
       - 'build'
       - '-f'
       - 'Dockerfile.edgenode'
+      - '--build-arg'
+      - 'HOLOCHAIN_VERSION=${_HOLOCHAIN_VERSION}'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/flowsta-edgenode:hc0.6.1'
+      - '${_REPO}/flowsta-edgenode:hc${_HOLOCHAIN_VERSION}'
       - '.'
 
 images:
-  - 'gcr.io/$PROJECT_ID/flowsta-edgenode:hc0.6.1'
+  - '${_REPO}/flowsta-edgenode:hc${_HOLOCHAIN_VERSION}'
 
 timeout: '600s'

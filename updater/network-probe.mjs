@@ -21,7 +21,8 @@ import { encodeHashToBase64 } from '@holochain/client';
 
 export const PROBE_VERSION = 1;
 
-const SHARED_ROLE = /identity|signing/;
+// Public DNAs a node mirrors: Flowsta identity and signing, and ProofPoll on its node.
+const SHARED_ROLE = /identity|signing|proofpoll/;
 const USER_APP_SUFFIX = /_[A-Za-z0-9+/]{20}$/;
 
 function toB64(x) {

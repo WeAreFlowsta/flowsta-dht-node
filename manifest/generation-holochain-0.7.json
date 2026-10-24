@@ -1,0 +1,13 @@
+{
+  "id": "holochain-0.7",
+  "state": "serving",
+  "holochain": "0.7.1",
+  "conductor": {
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f",
+    "admin_port": 4445
+  },
+  "bootstrap": {
+    "url": "https://<bootstrap host for the 0.7 line, e.g. bootstrap-staging-7.flowsta.com>"
+  },
+  "dnas": []
+}

@@ -1,13 +1,11 @@
 {
-  "name": "flowsta-dht-updater",
-  "version": "1.0.0",
+  "name": "flowsta-node-agent",
+  "version": "2.0.0",
   "type": "module",
   "private": true,
+  "description": "Runtime dependencies of the Flowsta node agent: one Holochain client per conductor line it manages",
   "dependencies": {
     "@holochain/client": "0.20.2",
-    "libsodium-wrappers": "0.7.15"
-  },
-  "overrides": {
-    "libsodium-wrappers": "0.7.15"
+    "holochain-client-07": "npm:@holochain/client@0.21.1"
   }
 }

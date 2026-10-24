@@ -19,16 +19,21 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required (t
 docker info >/dev/null 2>&1 || fail "Cannot talk to Docker. Is the daemon running, and is your user in the 'docker' group? (sudo usermod -aG docker \$USER, then log out and back in)"
 
 # ── config ───────────────────────────────────────────────────────────
-if [ ! -f conductor-config.yaml ]; then
-  cp conductor-config-example.yaml conductor-config.yaml
-  say "Created conductor-config.yaml (production network defaults)."
-else
-  say "conductor-config.yaml already exists - leaving it untouched."
+# The conductor config is no longer a file you keep: the agent renders one
+# per Holochain generation from the signed manifest. Your settings live in
+# .env (see "Configuration reference" in the README).
+if [ -f conductor-config.yaml ] && ! grep -q "^BOOTSTRAP_AUTH_MATERIAL=" .env 2>/dev/null; then
+  say "Found a conductor-config.yaml from the previous node version; the agent carries its auth material over on first run and renders configs from the manifest from then on."
 fi
 
 if [ ! -f .env ]; then
-  echo "API_URL=${API_URL_DEFAULT}" > .env
-  say "Created .env pointing at ${API_URL_DEFAULT}."
+  {
+    echo "API_URL=${API_URL_DEFAULT}"
+    echo "CHANNEL=stable"
+    echo "TZ=$(cat /etc/timezone 2>/dev/null || timedatectl show -p Timezone --value 2>/dev/null || echo UTC)"
+    echo "UPDATE_WINDOW=03:00-05:00"
+  } > .env
+  say "Created .env: production network, stable channel, maintenance window 03:00-05:00 local time."
 fi
 
 # ── bootstrap role extras ────────────────────────────────────────────
@@ -77,7 +82,8 @@ fi
 
 # ── verify ───────────────────────────────────────────────────────────
 say "Node is starting. Give it a minute, then verify it joined the network:"
-echo "  docker compose logs -f sidecar        # watch DNAs install (checksum-verified)"
+echo "  docker compose logs -f agent          # manifest accepted, conductors created, DNAs installed (checksum-verified)"
+echo "  curl -s localhost:8787/status.json    # what the node runs, what it is waiting for"
 echo "  docker exec flowsta-sidecar node /app/updater/dht-update.mjs   # force an update pass"
 echo
 echo "Your node syncs the network's public data over the next hours. Thank you"

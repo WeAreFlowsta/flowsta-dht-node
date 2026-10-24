@@ -12,9 +12,12 @@ reach each other even if Flowsta's own infrastructure is unreachable.
   thumbnails). Private user data never reaches your node — it lives in
   per-user encrypted networks your node is not a member of, by
   construction.
-- Auto-installs the current DNAs on first boot and auto-updates by
-  polling the Flowsta API every 6 hours, verifying every download
-  against published checksums.
+- Keeps itself current from a **signed manifest**: Flowsta publishes
+  what a node should run (conductor images by digest, the public DNAs,
+  the agent itself), signed offline with Team Flowsta's identity. Your
+  node verifies the signature before it acts, applies conductor changes
+  in your maintenance window, and rolls back if the new conductor does
+  not verify. Nobody, Flowsta included, can push anything unsigned to it.
 - Runs anywhere Docker runs: an old PC, a home server, a repurposed
   HoloPort, a small VPS.
 
@@ -34,21 +37,42 @@ cd flowsta-dht-node
 ./setup.sh
 ```
 
-That's it. The script checks Docker, writes the production-network
-config, and starts the node. The conductor image is public (no registry
-login), the bundled DNAs install on first boot, and the sidecar keeps
-them current - including any public DNAs Flowsta adds in the future,
-each download verified against published checksums before install.
+That's it. The script checks Docker, writes `.env` (production
+network, stable channel, a 03:00-05:00 maintenance window in your time
+zone) and starts the agent. The agent fetches the signed manifest,
+creates one conductor per Holochain generation the manifest lists,
+installs the public DNAs (each bundle verified against the manifest's
+sha256 before install) and keeps all of it current. Images are public;
+no registry login.
 
 <details>
 <summary>Prefer to do it by hand?</summary>
 
 ```bash
-cp conductor-config-example.yaml conductor-config.yaml   # works as-is for production
-echo "API_URL=https://auth-api.flowsta.com" > .env
+printf 'API_URL=https://auth-api.flowsta.com\nCHANNEL=stable\nTZ=%s\nUPDATE_WINDOW=03:00-05:00\n' "$(cat /etc/timezone)" > .env
 docker compose up -d
 ```
 </details>
+
+**Upgrading a node from the previous version** (sidecar + compose-managed
+conductor), in two steps so the agent can read your running conductor
+before anything is removed:
+
+```bash
+git pull && docker compose up -d agent
+docker logs -f flowsta-agent        # wait for "now on sha256:…" (about a minute)
+docker compose up -d --remove-orphans              # add --profile bootstrap if you run that role
+```
+
+The agent adopts the running conductor: it carries your auth material
+and data path over from its config, stops it, creates the new conductor
+on the same data volume, verifies that every app came across (and rolls
+back if not), then removes the old container. The second command removes
+the old sidecar (and, with the bootstrap profile, replaces the old
+bootstrap server with the proxy and the per-generation servers). A
+minute offline, no data lost. If the old conductor was already gone, the
+agent still finds its data volume, but then renders the config from
+defaults instead of carrying yours over.
 
 ## What you're signing up for
 
@@ -58,13 +82,13 @@ docker compose up -d
 - **Disk** grows slowly with network history (20 GB headroom is plenty
   today). **Bandwidth** is light for the basic node; only the optional
   bootstrap role relays traffic.
-- **Low maintenance, not zero.** DNA updates are automatic and
-  checksum-verified. Three things are still yours to do, occasionally:
-  `git pull && docker compose pull && docker compose up -d` for node
-  software and conductor updates, your operating system's own updates,
-  and (bootstrap role only) a `docker restart` after a certificate
-  renewal. See [Updating](#updating).
-- **Your node reports its health.** Every 10 minutes the sidecar sends
+- **Low maintenance.** DNA, conductor and agent updates arrive through
+  the signed manifest and apply themselves in your maintenance window,
+  with verification and rollback. What stays yours: your operating
+  system's own updates, and (bootstrap role only) a `docker restart` of
+  the bootstrap containers after a certificate renewal. See
+  [Updating](#updating).
+- **Your node reports its health.** Every 10 minutes the agent sends
   the Flowsta API a small report: which public DNAs it holds, whether
   its copy agrees with the rest of the network, how recently it
   gossiped with each peer, and whether its connections are direct or
@@ -87,17 +111,21 @@ wrong network, blocked egress). Two checks, a couple of minutes after
 startup:
 
 ```bash
-# 1. DNAs installed and enabled?
-docker exec flowsta-sidecar node -e "
+# 1. What the agent did and what it is waiting for
+docker compose logs -f agent
+curl -s localhost:8787/status.json       # manifest sequence, generations, last change, history
+
+# 2. DNAs installed and enabled, per conductor (admin port from status.json)
+docker exec flowsta-agent node -e "
 import('@holochain/client').then(async ({ AdminWebsocket }) => {
   const a = await AdminWebsocket.connect({ url: new URL('ws://localhost:4444'),
     wsClientOptions: { origin: 'flowsta-dht-node' } });
   const apps = await a.listApps({});
-  console.log(apps.map(x => x.installed_app_id + ' [' + x.status.type + ']').join('\n'));
+  console.log(apps.map(x => x.installed_app_id + ' [' + JSON.stringify(x.status) + ']').join('\n'));
   process.exit(0); });"
 
-# 2. Seeing remote peers? (should climb well past your own app count)
-docker exec flowsta-sidecar node -e "
+# 3. Seeing remote peers? (should climb well past your own app count)
+docker exec flowsta-agent node -e "
 import('@holochain/client').then(async ({ AdminWebsocket }) => {
   const a = await AdminWebsocket.connect({ url: new URL('ws://localhost:4444'),
     wsClientOptions: { origin: 'flowsta-dht-node' } });
@@ -105,9 +133,11 @@ import('@holochain/client').then(async ({ AdminWebsocket }) => {
   process.exit(0); });"
 ```
 
-If the peer count stays at (roughly) your own app count, your node is
-isolated — check the bootstrap URLs and auth material in
-`conductor-config.yaml`, and that outbound HTTPS/QUIC isn't blocked.
+(For a 0.7 conductor use `holochain-client-07` in place of
+`@holochain/client` and its admin port, 4445 by default.) If the peer
+count stays at (roughly) your own app count, your node is isolated:
+check that outbound HTTPS/QUIC isn't blocked, and the agent log for a
+refused manifest or a rolled-back change.
 
 ## The bootstrap role (optional): network redundancy
 
@@ -188,65 +218,95 @@ Create a `.env` file in the repo root:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `API_URL` | Yes | — | Flowsta API URL for auto-updates |
-| `CONDUCTOR_IMAGE` | No | public Flowsta image | Override the conductor image |
-| `UPDATE_INTERVAL` | No | `21600` (6 h) | Seconds between auto-update checks |
-| `TLS_DOMAIN` | bootstrap role | — | Domain whose Let's Encrypt cert to serve |
-| `NODE_SECRET` | No | — | Legacy; bundle downloads are open (sha256-verified) |
+| `API_URL` | Yes | — | Flowsta API URL (manifest, DNA bundles, health reports) |
+| `CHANNEL` | No | `stable` | Manifest channel. Community nodes stay on `stable` |
+| `UPDATE_WINDOW` | No | `03:00-05:00` | When conductor and agent changes may happen, in `TZ` |
+| `TZ` | No | `UTC` | Your time zone, so the window is yours |
+| `SECURITY_UPDATES_ANYTIME` | No | `1` | Let security advisories act outside the window |
+| `TLS_DOMAIN` | bootstrap role | — | Domain whose Let's Encrypt cert the 0.6-line bootstrap server serves |
+| `TLS_DOMAIN_07` | bootstrap role | — | Same for the 0.7-line server (second hostname, `--profile bootstrap-07`) |
 | `NODE_LABEL` | No | hostname | Name your node reports under (lowercase letters, digits, dashes) |
+| `NODE_SECRET` | No | — | Fleet nodes only |
 | `REPORT_INTERVAL` | No | `600` (10 min) | Seconds between health reports |
 | `REPORT_DISABLED` | No | `0` | Set `1` to send no health reports |
+| `BOOTSTRAP_AUTH_MATERIAL`, `RELAY_AUTH_MATERIAL` | No | community client id | Bootstrap/relay auth material in the rendered conductor configs |
+| `AGENT_IMAGE` | No | the published agent image | Only for developing the agent itself |
+| `DRY_RUN` | No | `0` | Set `1` to plan and log only; the agent changes nothing. Useful for the first start on an existing node |
+| `MANIFEST_SIGNER_DID` | No | Team Flowsta's DID | Only for Flowsta's own test channels |
 
-**Networks:** the example config joins the **production** network —
-the only network community nodes should join. (Flowsta operates
-separate internal networks for testing; nodes must never mix networks.)
+**Networks:** the `stable` channel joins the **production** network, the
+only network community nodes should join. (Flowsta operates separate
+internal networks for testing; nodes must never mix networks.)
 
-**Auth material:** the value in the example config is the **shared
-community client id** — public by design. It identifies community
-nodes to Flowsta's rate limiting and can be rotated if abused; it is
-not a secret and grants nothing beyond bootstrap access.
+**Auth material:** the default is the **shared community client id**,
+public by design. It identifies community nodes to Flowsta's rate
+limiting and can be rotated if abused; it is not a secret and grants
+nothing beyond bootstrap access.
+
+**The status page** (`curl -s localhost:8787/status.json`, loopback only)
+shows the manifest in force, each generation's image and last change,
+advisories and whether they were applied, what is waiting for the
+window, and the agent's recent history.
 
 ## Architecture
 
-Three containers (host networking):
+All containers use host networking.
 
-1. **conductor** — Holochain 0.6.1/Iroh edge node; stores data, runs
-   gossip, admin WebSocket on `localhost:4444` (not exposed beyond the
-   host). Data persists in the `conductor-data` Docker volume across
-   restarts and upgrades.
-2. **sidecar** — installs bundled DNAs on first boot; polls the
-   Flowsta API for new versions every 6 hours and verifies every
-   bundle against the manifest's sha256 before installing.
-3. **bootstrap-srv** *(optional, `--profile bootstrap`)* — upstream
-   `kitsune2-bootstrap-srv`: open peer discovery + SBD signal + Iroh
-   relay.
+1. **agent** (`flowsta-agent`, the one container in `docker-compose.yml`)
+   fetches `GET /api/v1/vault/node/manifest?channel=…` once a minute,
+   verifies the Ed25519 signature against Team Flowsta's identity
+   (`did:flowsta:uhCAkWuA-Ehm9…`, baked into the image) and refuses
+   anything unsigned, signed by another key, or older than what it
+   already applied. It then reconciles: one conductor per generation,
+   the DNAs each lists, itself. See `agent/agent.mjs`; the verification
+   is `agent/lib/manifest.mjs` and is tested on paper in `agent/test/`.
+2. **conductors** (`flowsta-conductor-<generation>`, created by the
+   agent) — the Flowsta edge node image at the digest the manifest
+   names. Each generation has its own data volume
+   (`flowsta-conductor-data-<generation>`), admin port on localhost
+   (4444 for the 0.6 line, 4445 for 0.7) and bootstrap host. During a
+   Holochain line transition two run side by side; when a generation
+   is marked `retired` its conductor stops and its volume stays.
+3. **bootstrap role** *(optional, `--profile bootstrap`, plus
+   `--profile bootstrap-07` once you have the second hostname)* — one
+   upstream `kitsune2-bootstrap-srv` per line behind an HAProxy SNI
+   pass-through on :443 (`bootstrap/haproxy.cfg`): the proxy reads the
+   hostname from the TLS hello and forwards the still-encrypted bytes;
+   each server terminates its own TLS with its own certificate.
+
+**How a conductor change happens:** pull the new image → stop the
+running conductor and keep it as `…-previous` → create the new
+container on the same volume with the config rendered from the
+manifest → verify (admin port answers, every expected app enabled, no
+panic in the log, a gossip round within 10 minutes when peers exist)
+→ remove `…-previous`. If verification fails the new container is
+removed and the previous one started again; the agent logs the
+rollback, reports it, and does not retry that image for 24 hours. The
+agent replaces itself the same way, from the manifest's digest.
 
 ## Updating
 
-DNA updates are automatic. To trigger one manually:
+Everything the manifest covers updates itself: public DNAs (any time,
+additive, sha256-verified), conductor images and configs and the agent
+(in your maintenance window, verified, rolled back on failure), and
+Flowsta's **advisories** ("restart the conductor", "security update"),
+which the status page lists with whether they were applied. Security
+advisories may act outside the window unless you set
+`SECURITY_UPDATES_ANYTIME=0`.
 
-```bash
-docker exec flowsta-sidecar node /app/updater/dht-update.mjs
-```
+Old DNA versions and retired generations are kept on purpose: your
+node keeps serving history for peers on older versions, and the agent
+never deletes a data volume.
 
-To update the node software itself:
+`git pull && docker compose up -d` is only needed when this repository
+changes (the compose file, the bootstrap proxy config); the agent image
+itself comes through the manifest.
 
-```bash
-git pull
-docker compose pull
-docker compose up -d          # add --profile bootstrap if you run it
-```
-
-Old DNA versions are kept on purpose — your node keeps serving history
-for peers on older versions.
-
-**What is still manual today** (an automatic, verified update path is
-planned - see the Flowsta docs when it ships): the conductor image and
-node software (`docker compose pull` above), your operating system's
-updates, and a `docker restart flowsta-bootstrap` after Let's Encrypt
-renews the certificate (bootstrap role only). If your OS applies Docker
-updates unattended, turn on Docker's `live-restore` so a Docker restart
-leaves the conductor running:
+**What is still manual:** your operating system's updates, and
+`docker restart flowsta-bootstrap-srv-06 flowsta-bootstrap-srv-07`
+after Let's Encrypt renews a certificate (bootstrap role only). If
+your OS applies Docker updates unattended, turn on Docker's
+`live-restore` so a Docker restart leaves the conductors running:
 
 ```bash
 echo '{ "live-restore": true }' | sudo tee /etc/docker/daemon.json && sudo systemctl reload docker
@@ -256,8 +316,9 @@ echo '{ "live-restore": true }' | sudo tee /etc/docker/daemon.json && sudo syste
 ## Logs & troubleshooting
 
 ```bash
-docker logs flowsta-conductor --tail 50    # conductor
-docker logs flowsta-sidecar --tail 50      # DNA installs + updates
+docker logs flowsta-agent --tail 50                      # manifest, changes, rollbacks, DNA installs, reports
+docker logs flowsta-conductor-holochain-0.6 --tail 50    # a conductor (one per generation)
+curl -s localhost:8787/status.json                       # the agent's view of the node
 ```
 
 - **Peer count stuck at ~your own apps** — wrong bootstrap URL/auth

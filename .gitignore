@@ -1,3 +1,6 @@
-node_modules/
-*.happ
 conductor-config.yaml
+*.happ
+node_modules/
+
+# signed manifests are published through the API; the body is what is versioned
+manifest/*.signed.json
