@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { canonicalJson } from '../lib/canonical.mjs';
 import { verifyManifest, statementFor, didToVerifyKey, validateShape, bodyHash } from '../lib/manifest.mjs';
+import { downloadRefusal, MAX_BUNDLE_BYTES } from '../lib/dnas.mjs';
 
 function blake2bLocation(core) {
   const h = createHash('blake2b512').update(core).digest(); // placeholder: location bytes are not checked by the verifier
@@ -100,4 +101,23 @@ test('shape: images must be digest-pinned, ports unique, states known', () => {
   assert.match(validateShape({ ...badState, signature: { signer: 'x', sig: 'y' } }), /bad state/);
   const badAdvisory = structuredClone(base); badAdvisory.advisories = [{ id: 'x', severity: 'urgent', action: 'update', text: '' }];
   assert.match(validateShape({ ...badAdvisory, signature: { signer: 'x', sig: 'y' } }), /severity/);
+});
+
+test('a manifest for another channel is refused even when the trusted key signed it', () => {
+  const s = testSigner();
+  const m = signed(sampleManifest({ channel: 'staging' }), s);
+  assert.equal(verifyManifest(m, { signerDid: s.did, previousSequence: 0, channel: 'staging' }).ok, true);
+  const r = verifyManifest(m, { signerDid: s.did, previousSequence: 0, channel: 'stable' });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /channel "staging".*on "stable"/);
+  // Callers that pass no channel (the release tool's own pre-check) keep the old behaviour.
+  assert.equal(verifyManifest(m, { signerDid: s.did, previousSequence: 0 }).ok, true);
+});
+
+test('bundle downloads: https, the API host only, bounded', () => {
+  assert.equal(downloadRefusal('https://auth-api.flowsta.com/api/v1/vault/node/dna-bundle/identity/1.4', 'auth-api.flowsta.com'), null);
+  assert.match(downloadRefusal('https://evil.example/x.happ', 'auth-api.flowsta.com'), /not the API host/);
+  assert.match(downloadRefusal('http://auth-api.flowsta.com/x.happ', 'auth-api.flowsta.com'), /not https/);
+  assert.match(downloadRefusal('nope', 'auth-api.flowsta.com'), /not a URL/);
+  assert.equal(MAX_BUNDLE_BYTES, 64 * 1048576);
 });

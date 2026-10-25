@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planActions, legacyDataMount, actionableAdvisories, GENERATION_LABEL, CONFIG_LABEL } from '../lib/plan.mjs';
 import { parseWindow, inWindow } from '../lib/window.mjs';
-import { renderConductorConfig, carryOverFromConfig } from '../lib/conductor-config.mjs';
+import { renderConductorConfig, carryOverFromConfig, DEFAULT_ALLOWED_ORIGINS } from '../lib/conductor-config.mjs';
+import { conductorContainerSpec } from '../lib/docker.mjs';
 import { tarOfFile, filesOfTar } from '../lib/tar.mjs';
 
 const IMG6 = 'repo/edgenode@sha256:' + '6'.repeat(64);
@@ -119,4 +120,22 @@ test('tar round trip: one file in, the same file out', () => {
   const files = filesOfTar(tar);
   assert.deepEqual(Object.keys(files), ['conductor-config.template.yaml']);
   assert.equal(files['conductor-config.template.yaml'].toString(), 'hello: world\n');
+});
+
+test('conductor config: the admin interface answers the agent and the API, not any origin', () => {
+  const gen = { id: 'holochain-0.7', holochain: '0.7.1', conductor: { admin_port: 4445 }, bootstrap: { url: 'https://bootstrap-7.flowsta.com' } };
+  const text = renderConductorConfig(gen, { authBootstrap: 'x', authRelay: 'x' });
+  assert.match(text, /allowed_origins: "flowsta-agent,flowsta-auth-api"/);
+  assert.equal(DEFAULT_ALLOWED_ORIGINS, 'flowsta-agent,flowsta-auth-api');
+  assert.match(renderConductorConfig(gen, { authBootstrap: 'x', authRelay: 'x', allowedOrigins: 'flowsta-agent,my-tool' }), /"flowsta-agent,my-tool"/);
+  assert.throws(() => renderConductorConfig(gen, { authBootstrap: 'x', authRelay: 'x', allowedOrigins: "x'\ny: 1" }));
+});
+
+test('conductor container spec: a memory cap is applied only when set', () => {
+  const base = { image: 'repo/edgenode@sha256:' + '6'.repeat(64), generation: 'holochain-0.6', dataVolume: 'v', labels: {} };
+  assert.equal(conductorContainerSpec(base).HostConfig.Memory, undefined);
+  const capped = conductorContainerSpec({ ...base, memoryBytes: 1400 * 1048576 }).HostConfig;
+  assert.equal(capped.Memory, 1400 * 1048576);
+  assert.equal(capped.MemorySwap, 2800 * 1048576);
+  assert.equal(conductorContainerSpec({ ...base, memoryBytes: 1, memorySwapBytes: 5 }).HostConfig.MemorySwap, 5);
 });

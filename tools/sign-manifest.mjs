@@ -71,9 +71,11 @@ if (opt('publish-file')) {
   const file = opt('publish-file');
   const signed = JSON.parse(fs.readFileSync(file, 'utf8'));
   const api = (opt('api', process.env.FLOWSTA_API_URL || 'https://auth-api.flowsta.com')).replace(/\/$/, '');
+  // Verified against the signer this machine trusts (the Vault key, or
+  // MANIFEST_SIGNER_DID for staging) - never against whatever the file claims.
   const signer = process.env.MANIFEST_SIGNER_DID || DEFAULT_SIGNER_DID;
-  const verdict = verifyManifest(signed, { signerDid: signed.signature?.signer === signer ? signer : signed.signature?.signer, previousSequence: 0 });
-  if (!verdict.ok) throw new Error(`${file} does not verify: ${verdict.reason}`);
+  const verdict = verifyManifest(signed, { signerDid: signer, previousSequence: 0, channel: signed.channel });
+  if (!verdict.ok) throw new Error(`${file} does not verify as ${signer}: ${verdict.reason}`);
   const r = await fetch(`${api}/api/v1/vault/node/manifest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(signed) });
   const text = await r.text();
   if (!r.ok) throw new Error(`upload refused: ${r.status} ${text}`);
@@ -95,13 +97,21 @@ if (body.signature) throw new Error(`${bodyPath} must not carry a signature; it 
 if (body.channel !== channel) throw new Error(`${bodyPath} says channel "${body.channel}"`);
 
 // Next sequence: one above what the API serves, unless given.
+// The API's answer is unauthenticated: a jump far beyond the last sequence this
+// machine signed is refused without --sequence, so a hostile API cannot have
+// the signer burn the channel's sequence space (found 2026-10-25).
+const MAX_SEQUENCE_JUMP = 100;
 let sequence = Number(opt('sequence', 0));
 if (!sequence) {
   const res = await fetch(`${API}/api/v1/vault/node/manifest?channel=${encodeURIComponent(channel)}`);
   if (res.ok) sequence = (await res.json()).sequence + 1;
   else if (res.status === 404) sequence = 1;
   else throw new Error(`could not read the current manifest: HTTP ${res.status}`);
+  const lastSignedPath = path.join(root, 'manifest', `${channel}.signed.json`);
+  const lastSigned = fs.existsSync(lastSignedPath) ? JSON.parse(fs.readFileSync(lastSignedPath, 'utf8')).sequence : 0;
+  if (sequence > lastSigned + MAX_SEQUENCE_JUMP) throw new Error(`the API says the next sequence is ${sequence} but the last one signed here was ${lastSigned}; pass --sequence to confirm`);
 }
+if (!Number.isInteger(sequence) || sequence < 1 || sequence > 2 ** 31 - 1) throw new Error(`sequence ${sequence} is out of range`);
 const manifest = { ...body, sequence, issued_at: new Date().toISOString() };
 const statement = statementFor(manifest);
 console.log(`channel ${channel} sequence ${sequence}\nstatement ${statement}`);
@@ -142,7 +152,7 @@ if (sigBytes.length !== 64) throw new Error(`unexpected signature length ${sigBy
 manifest.signature = { signer: SIGNER_DID, sig: sigBytes.toString('base64'), statement };
 
 const expectedKey = didToVerifyKey(SIGNER_DID);
-const verdict = verifyManifest(manifest, { signerDid: SIGNER_DID, previousSequence: sequence - 1 });
+const verdict = verifyManifest(manifest, { signerDid: SIGNER_DID, previousSequence: sequence - 1, channel });
 if (!verdict.ok) throw new Error(`the signed manifest does not verify as ${SIGNER_DID}: ${verdict.reason}. Is the Vault signed in as @weareflowsta? (key ${expectedKey?.toString('base64url')})`);
 const outPath = path.join(root, 'manifest', `${channel}.signed.json`);
 fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2) + '\n');
