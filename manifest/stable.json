@@ -56,7 +56,7 @@
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:abf3f821aa249de5b954259433c29416c5fd8c1a002bebad4b9e529e99d95095"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:0ef521a641d3f9116316c65a007dfd20dc41db8800451ea351d0a494fd07b723"
   },
   "advisories": [
     {
@@ -64,6 +64,12 @@
       "severity": "routine",
       "action": "notice",
       "text": "Your node is now kept current from a manifest signed by Team Flowsta. Nothing changes in what it stores; conductor updates now happen in your maintenance window with verification and rollback."
+    },
+    {
+      "id": "agent-2-0-8-security",
+      "severity": "security",
+      "action": "update",
+      "text": "Agent 2.0.8: a manifest for another channel is refused; DNA downloads are bounded to the API host; safer recoveries and self-updates."
     }
   ]
 }
