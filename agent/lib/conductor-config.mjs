@@ -20,8 +20,11 @@ export function holochainLine(version) {
  * must never change for a running generation: a different path is an empty
  * conductor beside the real data, and nothing but the path would tell.
  */
-export function renderConductorConfig(generation, { authBootstrap, authRelay, tracing = 'info,kitsune2=info', dataRoot = '/data/holochain', lairRoot }) {
+export const DEFAULT_ALLOWED_ORIGINS = 'flowsta-agent,flowsta-auth-api';
+
+export function renderConductorConfig(generation, { authBootstrap, authRelay, tracing = 'info,kitsune2=info', dataRoot = '/data/holochain', lairRoot, allowedOrigins = DEFAULT_ALLOWED_ORIGINS }) {
   lairRoot ||= `${dataRoot}/ks`;
+  if (!/^(\*|[a-zA-Z0-9._:\/-]+(,[a-zA-Z0-9._:\/-]+)*)$/.test(allowedOrigins)) throw new Error(`bad allowed origins "${allowedOrigins}"`);
   const line = holochainLine(generation.holochain);
   const host = generation.bootstrap.url.replace(/^https:\/\//, '').replace(/\/+$/, '');
   const yamlStr = (s) => JSON.stringify(String(s));
@@ -33,7 +36,9 @@ export function renderConductorConfig(generation, { authBootstrap, authRelay, tr
     '    type: websocket',
     `    port: ${generation.conductor.admin_port}`,
     '    danger_bind_addr: null',
-    "    allowed_origins: '*'",
+    // The admin interface answers the agent and the API, not any local page
+    // (`*` did, until 2026-10-25); operators list more with CONDUCTOR_ALLOWED_ORIGINS.
+    `    allowed_origins: ${yamlStr(allowedOrigins)}`,
     '',
     'network:',
     `  bootstrap_url: ${yamlStr(`https://${host}`)}`,

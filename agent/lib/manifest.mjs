@@ -99,12 +99,16 @@ export function validateShape(m) {
 
 /**
  * Full acceptance check. `signerDid` is the DID baked into the image;
- * `previousSequence` the sequence already applied (0 when none).
+ * `previousSequence` the sequence already applied (0 when none); `channel`
+ * the channel this node is on - a manifest for another channel is refused
+ * even when the same key signed it (the API serving the staging manifest as
+ * stable must never move a production node; found 2026-10-25).
  * Returns { ok: true, manifest } or { ok: false, reason }.
  */
-export function verifyManifest(manifest, { signerDid, previousSequence = 0 }) {
+export function verifyManifest(manifest, { signerDid, previousSequence = 0, channel }) {
   const shape = validateShape(manifest);
   if (shape) return { ok: false, reason: shape };
+  if (channel !== undefined && manifest.channel !== channel) return { ok: false, reason: `manifest is for channel "${manifest.channel}"; this node is on "${channel}"` };
   if (manifest.signature.signer !== signerDid) return { ok: false, reason: 'signer is not the trusted Flowsta identity' };
   const key = didToVerifyKey(signerDid);
   if (!key) return { ok: false, reason: 'trusted signer DID is malformed' };

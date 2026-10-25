@@ -28,6 +28,9 @@
  *   CONDUCTOR_DATA_ROOT       data_root_path inside the conductor container; default: carried over from the
  *                             adopted conductor, else /data/holochain. Never change it for a running generation.
  *   CONDUCTOR_LAIR_ROOT       lair_root (default <CONDUCTOR_DATA_ROOT>/ks)
+ *   CONDUCTOR_MEMORY          memory cap for each conductor container, e.g. 1400m (default none);
+ *   CONDUCTOR_MEMORY_SWAP     memory+swap cap, e.g. 2400m (default twice the memory cap)
+ *   CONDUCTOR_ALLOWED_ORIGINS admin-interface origins, comma-separated (default flowsta-agent,flowsta-auth-api)
  *   LEGACY_CONDUCTOR_NAMES    containers the agent may adopt (default flowsta-conductor,holochain-conductor)
  *   LEGACY_DATA_VOLUMES       volumes of an already-removed conductor the agent may adopt
                              (default flowsta-dht-node_conductor-data,holochain-data,holochain-conductor-data)
@@ -44,6 +47,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { Docker, conductorContainerSpec } from './lib/docker.mjs';
 import { verifyManifest, DEFAULT_SIGNER_DID } from './lib/manifest.mjs';
+import { DEFAULT_ALLOWED_ORIGINS } from './lib/conductor-config.mjs';
 import { planActions, legacyDataMount, actionableAdvisories, containerNameFor, dataVolumeFor, MANAGED_LABEL, GENERATION_LABEL, CONFIG_LABEL, IMAGE_LABEL, SEQUENCE_LABEL } from './lib/plan.mjs';
 import { parseWindow, inWindow } from './lib/window.mjs';
 import { renderConductorConfig, carryOverFromConfig } from './lib/conductor-config.mjs';
@@ -76,8 +80,24 @@ const cfg = {
   happsDir: env.HAPPS_DIR || '/app/happs',
   version: env.AGENT_VERSION || 'dev',
   dryRun: env.DRY_RUN === '1',
+  allowedOrigins: env.CONDUCTOR_ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS,
+  memoryBytes: parseSize(env.CONDUCTOR_MEMORY),
+  memorySwapBytes: parseSize(env.CONDUCTOR_MEMORY_SWAP),
 };
 if (!cfg.apiUrl) { console.error('API_URL is required'); process.exit(1); }
+// The manifest is safe over http (it is signed); the node secret is not.
+if (!/^https:\/\//.test(cfg.apiUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)([:/]|$)/.test(cfg.apiUrl)) { console.error('API_URL must be https://'); process.exit(1); }
+const apiHost = new URL(cfg.apiUrl).host;
+const STALE_MANIFEST_MS = 14 * 24 * 3600 * 1000;
+const FAILED_IMAGE_TTL_MS = 24 * 3600 * 1000;
+
+/** "1400m", "2g", "512k" or plain bytes → bytes; undefined when unset. */
+function parseSize(s) {
+  if (!s) return undefined;
+  const m = /^(\d+)([kmg]?)$/i.exec(String(s).trim());
+  if (!m) throw new Error(`bad size "${s}" (use e.g. 1400m or 2g)`);
+  return Number(m[1]) * ({ '': 1, k: 1024, m: 1048576, g: 1073741824 })[m[2].toLowerCase()];
+}
 
 const docker = new Docker();
 const stateFile = path.join(cfg.stateDir, 'state.json');
@@ -102,7 +122,7 @@ async function fetchManifest() {
   const text = await res.text();
   let manifest;
   try { manifest = JSON.parse(text); } catch { throw new Error('manifest is not JSON'); }
-  const verdict = verifyManifest(manifest, { signerDid: cfg.signerDid, previousSequence: state.manifest_sequence });
+  const verdict = verifyManifest(manifest, { signerDid: cfg.signerDid, previousSequence: state.manifest_sequence, channel: cfg.channel });
   if (!verdict.ok) {
     if (manifest?.sequence === state.manifest_sequence && state.manifest) { manifestEtag = res.headers.get('etag'); return null; }
     log(`manifest REFUSED: ${verdict.reason}`);
@@ -118,6 +138,20 @@ async function fetchManifest() {
   log(`manifest ${manifest.channel} #${manifest.sequence} accepted (${manifest.generations.map((g) => `${g.id}:${g.state}`).join(', ')})`);
   for (const a of manifest.advisories || []) if (!state.advisories_applied.includes(a.id)) log(`advisory [${a.severity}] ${a.id}: ${a.text}`);
   return manifest;
+}
+
+/** The manifest in force is old: an API that answers 304 or 404 forever looks like "nothing new" otherwise. */
+let staleWarnedAt = 0;
+function manifestAgeMs() {
+  const t = state.manifest ? Date.parse(state.manifest.issued_at) : NaN;
+  return Number.isNaN(t) ? null : Date.now() - t;
+}
+function warnIfStale() {
+  const age = manifestAgeMs();
+  if (age === null || age < STALE_MANIFEST_MS) return;
+  if (Date.now() - staleWarnedAt < 24 * 3600 * 1000) return;
+  staleWarnedAt = Date.now();
+  log(`WARNING: the manifest in force (${cfg.channel} #${state.manifest.sequence}) was issued ${Math.round(age / 86400000)} days ago and the API has offered nothing newer`);
 }
 
 // ── observation ──────────────────────────────────────────────────────────────
@@ -167,6 +201,22 @@ async function authMaterial(legacy) {
       log(`carried auth material, tracing and the data path (${carried.dataRoot || '/data/holochain'}) over from the existing conductor config`);
     } catch (e) { log(`could not read the existing conductor config (${e.message}); using the community client id`); }
   }
+  if (legacy && !legacy.id && !auth.dataRoot && !env.CONDUCTOR_DATA_ROOT) {
+    // A bare volume (its conductor already removed): read its layout instead
+    // of assuming /data/holochain. The upstream default data_root_path is
+    // /var/local/lib/holochain, a symlink to /data/holochain/var in the edge
+    // image, so a volume with holochain/var/databases and no holochain/databases
+    // was written by a conductor on the upstream path (the staging decoy, 10-24).
+    const image = state.manifest?.generations?.[0]?.conductor?.image;
+    const volume = legacyDataMount(legacy.inspect)?.volume;
+    if (image && volume) {
+      try {
+        const layout = await volumeLayout(image, volume);
+        if (layout.upstream) { auth.dataRoot = '/var/local/lib/holochain'; auth.lairRoot = layout.ks ? '/var/local/lib/holochain/ks' : undefined; }
+        log(`read the layout of ${volume}: ${layout.upstream ? 'upstream data path (/var/local/lib/holochain)' : 'image data path (/data/holochain)'}`);
+      } catch (e) { log(`could not read the layout of ${volume} (${e.message}); assuming /data/holochain`); }
+    }
+  }
   auth.authBootstrap ||= COMMUNITY_AUTH_MATERIAL;
   auth.authRelay ||= auth.authBootstrap;
   auth.tracing ||= 'info,kitsune2=info';
@@ -175,11 +225,25 @@ async function authMaterial(legacy) {
   return withEnvOverrides(auth);
 }
 
+/** Which data path a bare volume was written under: a throwaway, never-started container stats two paths. */
+async function volumeLayout(image, volume) {
+  await docker.pullImage(image);
+  const probe = await docker.createContainer(`flowsta-agent-layout-${Date.now()}`, { Image: image, Entrypoint: ['/bin/true'], HostConfig: { Binds: [`${volume}:/data:ro`] } });
+  try {
+    const upstreamDbs = await docker.statPath(probe.Id, '/data/holochain/var/databases');
+    const imageDbs = await docker.statPath(probe.Id, '/data/holochain/databases');
+    const ks = await docker.statPath(probe.Id, '/data/holochain/var/ks');
+    return { upstream: !!upstreamDbs && !imageDbs, ks: !!ks };
+  } finally {
+    await docker.removeContainer(probe.Id, { force: true }).catch(() => {});
+  }
+}
+
 function desiredFrom(manifest, auth) {
   return {
     agentImage: manifest.agent.image,
     generations: manifest.generations.map((g) => {
-      const config = renderConductorConfig(g, auth);
+      const config = renderConductorConfig(g, { ...auth, allowedOrigins: cfg.allowedOrigins });
       return { id: g.id, state: g.state, image: g.conductor.image, adminPort: g.conductor.admin_port, config, configSha: crypto.createHash('sha256').update(config).digest('hex'), adopts: g.adopts_legacy_conductor === true, dnas: g.dnas, holochain: g.holochain };
     }),
   };
@@ -192,7 +256,7 @@ async function createConductor(gen, { dataVolume, dataBind }, sequence) {
   await docker.pullImage(gen.image);
   if (!dataBind) await docker.createVolume(dataVolume, { [MANAGED_LABEL]: 'agent', [GENERATION_LABEL]: gen.id }).catch((e) => { if (e.status !== 409) throw e; });
   const labels = { [MANAGED_LABEL]: 'agent', [GENERATION_LABEL]: gen.id, [CONFIG_LABEL]: gen.configSha, [IMAGE_LABEL]: gen.image, [SEQUENCE_LABEL]: String(sequence) };
-  const created = await docker.createContainer(name, conductorContainerSpec({ image: gen.image, generation: gen.id, dataVolume, dataBind, labels }));
+  const created = await docker.createContainer(name, conductorContainerSpec({ image: gen.image, generation: gen.id, dataVolume, dataBind, labels, memoryBytes: cfg.memoryBytes, memorySwapBytes: cfg.memorySwapBytes }));
   try {
     await docker.putArchive(created.Id, TEMPLATE_DIR, tarOfFile(TEMPLATE_FILE, gen.config));
     await docker.startContainer(created.Id);
@@ -238,7 +302,9 @@ async function swapConductor(gen, oldContainer, { dataVolume, dataBind }, sequen
   log(`${gen.id}: ${reason}; replacing ${oldContainer.name} on ${dataBind || dataVolume}`);
   // What the old conductor holds is what the new one must hold: a conductor
   // that comes up empty beside the real data (a changed data path) fails here.
-  const expectedApps = oldContainer.running === false ? [] : await appsOf(gen.adminPort, gen.holochain);
+  // A stopped old conductor cannot be asked; the list the agent kept from its
+  // last report stands in, so the decoy guard holds on recoveries too.
+  const expectedApps = oldContainer.running === false ? (state.generations[gen.id]?.apps || []) : await appsOf(gen.adminPort, gen.holochain);
   if (expectedApps.length) log(`${gen.id}: the replacement must carry ${expectedApps.length} apps (${expectedApps.filter((a) => a.running).length} running)`);
   try {
     await docker.pullImage(gen.image);
@@ -252,7 +318,8 @@ async function swapConductor(gen, oldContainer, { dataVolume, dataBind }, sequen
   }
   await docker.updateContainer(oldContainer.id, { RestartPolicy: { Name: 'no' } }).catch(() => {});
   await docker.stopContainer(oldContainer.id, 90);
-  await docker.renameContainer(oldContainer.id, `${name}-previous`);
+  // A survivor of an interrupted rollback already carries the -previous name.
+  if (oldContainer.name !== `${name}-previous`) await docker.renameContainer(oldContainer.id, `${name}-previous`);
   let newId;
   try {
     newId = await createConductor(gen, { dataVolume, dataBind }, sequence);
@@ -351,6 +418,9 @@ async function applyAction(action, desired, observed) {
 /** Start the new agent from the manifest's digest with this container's settings, then step aside. */
 async function selfUpdate(image, self) {
   if (!self) return 'self-update skipped: cannot inspect own container (set AGENT_CONTAINER_NAME)';
+  if (state.agent?.failed?.image === image && Date.now() - state.agent.failed.at < FAILED_IMAGE_TTL_MS) {
+    return `agent: skipping self-update; ${image.split('@')[1]} failed ${Math.round((Date.now() - state.agent.failed.at) / 60000)} min ago (${state.agent.failed.reason}); retry after 24 h or a new manifest`;
+  }
   log(`agent: updating to ${image.split('@')[1]}`);
   await docker.pullImage(image);
   // Carry the operator's settings, not the old image's own ENV (AGENT_VERSION
@@ -380,13 +450,40 @@ async function selfUpdate(image, self) {
   return 'agent: replaced';
 }
 
-/** On start: if we are the new agent and the previous one is still around, retire it once we have verified a manifest. */
+/**
+ * After this agent's FIRST GOOD TICK: the agent it replaced (and any agent
+ * that rolled itself back) is retired. Not at start: a new image that
+ * starts and then fails every tick must leave its predecessor in place.
+ */
+let retiredPrevious = false;
+let startupFailures = 0;
 async function retirePreviousAgent() {
+  for (const suffix of ['-previous', '-failed']) {
+    const prev = await docker.inspectContainer(`${cfg.selfName}${suffix}`);
+    if (!prev) continue;
+    if (prev.State?.Running) await docker.stopContainer(prev.Id, 30).catch(() => {});
+    await docker.removeContainer(prev.Id, { force: true }).catch(() => {});
+    log(`agent: ${cfg.selfName}${suffix} removed`);
+  }
+  retiredPrevious = true;
+}
+
+/** This agent failed its first ticks and a predecessor exists: hand back, remember the image, exit. */
+async function rollbackSelf(reason) {
   const prev = await docker.inspectContainer(`${cfg.selfName}-previous`);
   if (!prev) return;
-  if (prev.State?.Running) await docker.stopContainer(prev.Id, 30).catch(() => {});
-  await docker.removeContainer(prev.Id, { force: true }).catch(() => {});
-  log('agent: previous agent container removed');
+  const self = await docker.inspectContainer(cfg.selfName);
+  const image = self?.Config?.Image || 'unknown';
+  log(`agent: ROLLBACK to the previous agent after ${startupFailures} failed ticks (${reason})`);
+  state.agent = { ...(state.agent || {}), failed: { image, at: Date.now(), reason } };
+  remember(state, { event: 'agent_rollback', image, reason });
+  persist();
+  if (self) await docker.renameContainer(self.Id, `${cfg.selfName}-failed`).catch(() => {});
+  await renameEvicting(prev.Id, cfg.selfName);
+  await docker.updateContainer(prev.Id, { RestartPolicy: { Name: 'unless-stopped' } }).catch(() => {});
+  await docker.startContainer(prev.Id);
+  if (self) await docker.updateContainer(self.Id, { RestartPolicy: { Name: 'no' } }).catch(() => {});
+  setTimeout(() => process.exit(0), 500);
 }
 
 // ── per-generation upkeep (any time) ────────────────────────────────────────
@@ -403,7 +500,7 @@ async function upkeep(desired, observed) {
       // Installing or enabling a DNA compiles its wasm; on a small box that
       // is minutes, so this client waits up to 15.
       admin = await connectAdmin(`ws://localhost:${gen.adminPort}`, { waitMs: 15000, holochain: gen.holochain, callTimeoutMs: 15 * 60 * 1000 });
-      const r = await reconcileDnas(admin, dnas, { happsDir: cfg.happsDir, downloadDir: `/tmp/flowsta-agent-${gen.id}`, log });
+      const r = await reconcileDnas(admin, dnas, { happsDir: cfg.happsDir, downloadDir: `/tmp/flowsta-agent-${gen.id}`, log, allowedHost: apiHost });
       if (r.installed.length) { remember(state, { event: 'dnas_installed', generation: gen.id, apps: r.installed }); persist(); }
       if (r.enabled.length) { remember(state, { event: 'dnas_enabled', generation: gen.id, apps: r.enabled }); persist(); }
       for (const f of r.failed) log(`${gen.id}: DNA ${f.app_id} not installed: ${f.reason}`);
@@ -446,8 +543,10 @@ async function report(desired, observed) {
       // slowest in the minutes after a start; the report is not worth failing over.
       admin = await connectAdmin(`ws://localhost:${gen.adminPort}`, { waitMs: 15000, holochain: gen.holochain, callTimeoutMs: 10 * 60 * 1000 });
       const base = await probeConductor(admin, { label: cfg.label, software: { agent: 'flowsta-agent', version: cfg.version } });
-      const g = state.generations[gen.id] || {};
-      const body = { ...base, generation: gen.id, holochain: gen.holochain, conductor_digest: (c.image.split('@')[1] || null), agent_digest: (observed.agentImage?.split('@')[1] || null), manifest_sequence: state.manifest_sequence, last_change: g.lastChange || null, last_rollback: g.lastRollback || null, advisories_applied: state.advisories_applied.slice(-20) };
+      const g = (state.generations[gen.id] ||= {});
+      // The app list the next replacement must carry, kept while the conductor can be asked.
+      try { g.apps = (await admin.listApps({})).map((a) => ({ id: a.installed_app_id, running: isRunning(a.status) })); persist(); } catch {}
+      const body = { ...base, generation: gen.id, holochain: gen.holochain, conductor_digest: (c.image.split('@')[1] || null), agent_digest: (observed.agentImage?.split('@')[1] || null), manifest_sequence: state.manifest_sequence, manifest_issued_at: state.manifest?.issued_at || null, channel: cfg.channel, signer: cfg.signerDid, last_change: g.lastChange || null, last_rollback: g.lastRollback || null, advisories_applied: state.advisories_applied.slice(-20) };
       const headers = { 'Content-Type': 'application/json' };
       if (cfg.nodeSecret) headers['X-Node-Secret'] = cfg.nodeSecret;
       const res = await fetch(`${cfg.apiUrl}/api/v1/vault/node/report`, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -470,6 +569,7 @@ async function tick() {
     await fetchManifest();
     const manifest = state.manifest;
     if (!manifest) return;
+    warnIfStale();
     const observed = await observe();
     const auth = await authMaterial(observed.legacy);
     const desired = desiredFrom(manifest, auth);
@@ -496,9 +596,11 @@ async function tick() {
     await upkeep(desired, after);
     if (Date.now() - lastReportAt >= cfg.reportMs) { await report(desired, after); lastReportAt = Date.now(); }
     current = { manifest, actions: results, waiting, lastTick: new Date().toISOString(), lastError: null };
+    if (!retiredPrevious) await retirePreviousAgent();
   } catch (e) {
     current.lastError = `${new Date().toISOString()} ${e.message}`;
     log(`tick failed: ${e.message}`);
+    if (!retiredPrevious && ++startupFailures >= 3) await rollbackSelf(e.message).catch((err) => log(`agent: rollback failed: ${err.message}`));
   } finally {
     busy = false;
   }
@@ -513,7 +615,7 @@ function statusServer() {
     const body = {
       node: cfg.label, channel: cfg.channel, agent_version: cfg.version, signer: cfg.signerDid,
       window: env.UPDATE_WINDOW || '03:00-05:00', in_window: inWindow(new Date(), cfg.window),
-      manifest: current.manifest ? { sequence: current.manifest.sequence, issued_at: current.manifest.issued_at, generations: current.manifest.generations.map((g) => ({ id: g.id, state: g.state, holochain: g.holochain, image: g.conductor.image })) } : null,
+      manifest: current.manifest ? { sequence: current.manifest.sequence, issued_at: current.manifest.issued_at, age_days: manifestAgeMs() === null ? null : Math.round(manifestAgeMs() / 86400000), stale: manifestAgeMs() !== null && manifestAgeMs() >= STALE_MANIFEST_MS, generations: current.manifest.generations.map((g) => ({ id: g.id, state: g.state, holochain: g.holochain, image: g.conductor.image })) } : null,
       generations: state.generations, agent: state.agent,
       advisories: (current.manifest?.advisories || []).map((a) => ({ ...a, applied: state.advisories_applied.includes(a.id) })),
       waiting_for_window: current.waiting, last_tick: current.lastTick, last_error: current.lastError,
@@ -530,6 +632,5 @@ const v = await docker.version().catch((e) => { console.error(`cannot talk to Do
 log(`flowsta node agent ${cfg.version} on Docker ${v.Version}; channel ${cfg.channel}; label ${cfg.label}; trusting ${cfg.signerDid}${cfg.dryRun ? '; DRY RUN' : ''}`);
 fs.mkdirSync(cfg.stateDir, { recursive: true });
 statusServer();
-await retirePreviousAgent();
 await tick();
 setInterval(tick, cfg.tickMs);

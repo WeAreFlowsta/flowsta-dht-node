@@ -8,13 +8,41 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-async function download(url, dest) {
-  const res = await fetch(url, { redirect: 'follow' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+export const MAX_BUNDLE_BYTES = 64 * 1048576;
+
+/** Why a bundle URL may not be fetched, or null when it may: https, the API's own host, nothing else. */
+export function downloadRefusal(url, allowedHost) {
+  let u;
+  try { u = new URL(url); } catch { return 'not a URL'; }
+  if (u.protocol !== 'https:') return 'not https';
+  if (allowedHost && u.host !== allowedHost) return `host ${u.host} is not the API host ${allowedHost}`;
+  return null;
 }
 
-export async function reconcileDnas(admin, dnas, { happsDir = '/app/happs', downloadDir = '/tmp/flowsta-agent-dnas', log = console.log } = {}) {
+/**
+ * A bundle is fetched from the API host only, without following redirects,
+ * within a time limit and a size cap: whoever controls the host named in a
+ * signed URL could otherwise stream without end and freeze the agent
+ * (found 2026-10-25). The sha256 check after the download is what proves
+ * the bytes; this only bounds the attempt.
+ */
+async function download(url, dest, { allowedHost, maxBytes = MAX_BUNDLE_BYTES, timeoutMs = 10 * 60 * 1000 } = {}) {
+  const refusal = downloadRefusal(url, allowedHost);
+  if (refusal) throw new Error(refusal);
+  const res = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const declared = Number(res.headers.get('content-length') || 0);
+  if (declared > maxBytes) throw new Error(`${declared} bytes is over the ${maxBytes}-byte limit`);
+  const chunks = []; let total = 0;
+  for await (const chunk of res.body) {
+    total += chunk.length;
+    if (total > maxBytes) throw new Error(`more than ${maxBytes} bytes`);
+    chunks.push(chunk);
+  }
+  fs.writeFileSync(dest, Buffer.concat(chunks));
+}
+
+export async function reconcileDnas(admin, dnas, { happsDir = '/app/happs', downloadDir = '/tmp/flowsta-agent-dnas', log = console.log, allowedHost } = {}) {
   const apps = await admin.listApps({});
   const byId = new Map(apps.map((a) => [a.installed_app_id, a]));
   const result = { installed: [], enabled: [], failed: [] };
@@ -44,7 +72,7 @@ export async function reconcileDnas(admin, dnas, { happsDir = '/app/happs', down
     if (fs.existsSync(bundled)) bytes = fs.readFileSync(bundled);
     if (!bytes || sha256(bytes) !== dna.sha256) {
       const dest = path.join(downloadDir, `${dna.app_id}_happ.happ`);
-      try { await download(dna.url, dest); bytes = fs.readFileSync(dest); } catch (e) { result.failed.push({ app_id: dna.app_id, reason: `download: ${e.message}` }); continue; }
+      try { await download(dna.url, dest, { allowedHost }); bytes = fs.readFileSync(dest); } catch (e) { result.failed.push({ app_id: dna.app_id, reason: `download: ${e.message}` }); continue; }
     }
     const actual = sha256(bytes);
     if (actual !== dna.sha256) { result.failed.push({ app_id: dna.app_id, reason: `sha256 ${actual} does not match the manifest` }); continue; }

@@ -62,6 +62,14 @@ export class Docker {
   renameContainer(id, name) { return this.request('POST', `/containers/${id}/rename?name=${encodeURIComponent(name)}`); }
   updateContainer(id, body) { return this.request('POST', `/containers/${id}/update`, { body }); }
   putArchive(id, path, tarBuffer) { return this.request('PUT', `/containers/${id}/archive?path=${encodeURIComponent(path)}`, { body: tarBuffer, raw: true }); }
+  /** Stat a path inside a container (created or running) without reading it; null when absent. */
+  async statPath(id, path) {
+    try {
+      const { headers } = await this.request('HEAD', `/containers/${id}/archive?path=${encodeURIComponent(path)}`, { raw: true });
+      const stat = headers['x-docker-container-path-stat'];
+      return stat ? JSON.parse(Buffer.from(stat, 'base64').toString('utf8')) : {};
+    } catch (e) { if (e.status === 404) return null; throw e; }
+  }
   async getArchive(id, path) {
     const { data } = await this.request('GET', `/containers/${id}/archive?path=${encodeURIComponent(path)}`, { raw: true });
     return data;
@@ -106,7 +114,7 @@ export class Docker {
 }
 
 /** The container spec for a generation's conductor. */
-export function conductorContainerSpec({ image, generation, dataVolume, dataBind, labels, env = [] }) {
+export function conductorContainerSpec({ image, generation, dataVolume, dataBind, labels, env = [], memoryBytes, memorySwapBytes }) {
   const Binds = dataBind ? [`${dataBind}:/data`] : [`${dataVolume}:/data`];
   return {
     Image: image,
@@ -116,6 +124,8 @@ export function conductorContainerSpec({ image, generation, dataVolume, dataBind
       NetworkMode: 'host',
       RestartPolicy: { Name: 'unless-stopped' },
       Binds,
+      // A per-node memory cap (CONDUCTOR_MEMORY); the 2026-10-08 Singapore cap was lost by the first adoption.
+      ...(memoryBytes ? { Memory: memoryBytes, MemorySwap: memorySwapBytes || memoryBytes * 2 } : {}),
       Ulimits: [
         { Name: 'nofile', Soft: 1048576, Hard: 1048576 },
         { Name: 'memlock', Soft: -1, Hard: -1 },
