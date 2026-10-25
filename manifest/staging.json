@@ -65,7 +65,22 @@
       "bootstrap": {
         "url": "https://bootstrap-staging-7.flowsta.com"
       },
-      "dnas": []
+      "dnas": [
+        {
+          "app_id": "flowsta_identity_v1_5",
+          "type": "identity",
+          "version": "1.5",
+          "sha256": "abd9d2c6a7d54705fadfe4d4968b53381b821967d676d8e0a347ae5057f159fa",
+          "url": "https://auth-api-staging.flowsta.com/api/v1/vault/node/dna-bundle/identity/1.5"
+        },
+        {
+          "app_id": "flowsta_signing_v1_5",
+          "type": "signing",
+          "version": "1.5",
+          "sha256": "0703e4dc066f7dee97abcae9e408bbd5dcd4e220ab03a1de58f1bd324abdf61a",
+          "url": "https://auth-api-staging.flowsta.com/api/v1/vault/node/dna-bundle/signing/1.5"
+        }
+      ]
     }
   ],
   "agent": {
@@ -89,6 +104,12 @@
       "severity": "security",
       "action": "update",
       "text": "Agent 2.0.8: a manifest for another channel is refused; DNA downloads are bounded to the API host; safer recoveries and self-updates."
+    },
+    {
+      "id": "2026-10-25-0-7-dnas",
+      "severity": "routine",
+      "action": "notice",
+      "text": "The 0.7 generation now carries identity 1.5 and signing 1.5, the first Flowsta DNAs on Holochain 0.7.1. The first install compiles their wasm, minutes on a small box."
     }
   ]
 }
