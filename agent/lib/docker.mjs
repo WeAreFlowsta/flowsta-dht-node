@@ -76,9 +76,10 @@ export class Docker {
   }
 
   /** Container logs as text (demultiplexed when the container has no TTY). */
-  async logs(id, { since, tail = 200 } = {}) {
+  async logs(id, { since, tail = 200, timestamps = false } = {}) {
     const q = new URLSearchParams({ stdout: '1', stderr: '1', tail: String(tail) });
     if (since) q.set('since', String(since));
+    if (timestamps) q.set('timestamps', '1');
     const { data } = await this.request('GET', `/containers/${id}/logs?${q}`, { raw: true });
     const out = [];
     let off = 0;

@@ -65,11 +65,26 @@
       "bootstrap": {
         "url": "https://bootstrap-staging-7.flowsta.com"
       },
-      "dnas": []
+      "dnas": [
+        {
+          "app_id": "flowsta_identity_v1_5",
+          "type": "identity",
+          "version": "1.5",
+          "sha256": "abd9d2c6a7d54705fadfe4d4968b53381b821967d676d8e0a347ae5057f159fa",
+          "url": "https://auth-api-staging.flowsta.com/api/v1/vault/node/dna-bundle/identity/1.5"
+        },
+        {
+          "app_id": "flowsta_signing_v1_5",
+          "type": "signing",
+          "version": "1.5",
+          "sha256": "0703e4dc066f7dee97abcae9e408bbd5dcd4e220ab03a1de58f1bd324abdf61a",
+          "url": "https://auth-api-staging.flowsta.com/api/v1/vault/node/dna-bundle/signing/1.5"
+        }
+      ]
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:0ef521a641d3f9116316c65a007dfd20dc41db8800451ea351d0a494fd07b723"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:6a4482e2776ae346a6f4bfa61e60d0ab28fa9a55a395eed83e7a313e6bf95432"
   },
   "advisories": [
     {
@@ -89,6 +104,12 @@
       "severity": "security",
       "action": "update",
       "text": "Agent 2.0.8: a manifest for another channel is refused; DNA downloads are bounded to the API host; safer recoveries and self-updates."
+    },
+    {
+      "id": "2026-10-25-0-7-dnas",
+      "severity": "routine",
+      "action": "notice",
+      "text": "The 0.7 generation now carries identity 1.5 and signing 1.5, the first Flowsta DNAs on Holochain 0.7.1. The first install compiles their wasm, minutes on a small box."
     }
   ]
 }

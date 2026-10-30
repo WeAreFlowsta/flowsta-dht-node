@@ -11,6 +11,10 @@
  * maintenance window and are verified; a failed change is rolled back to the
  * previous container. Every generation reports its health to the API.
  *
+ * One repair it makes on its own, any time: a conductor whose bootstrap
+ * registrations have been refused steadily for 30 minutes is restarted
+ * (lib/registration.mjs), at most once in 6 hours.
+ *
  * What it never does: delete a data volume, uninstall an app, accept an
  * inbound connection, act on an unsigned or older manifest.
  *
@@ -56,6 +60,7 @@ import { loadState, saveState, remember } from './lib/state.mjs';
 import { reconcileDnas } from './lib/dnas.mjs';
 import { verifyConductor, connectAdmin, isRunning } from './lib/verify.mjs';
 import { probeConductor } from '../updater/network-probe.mjs';
+import { putErrors, registrationVerdict } from './lib/registration.mjs';
 
 const COMMUNITY_AUTH_MATERIAL = 'eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0=';
 const TEMPLATE_DIR = '/usr/local/share/holochain';
@@ -530,6 +535,49 @@ async function applyAdvisories(manifest, desired, observed, isWindow) {
   }
 }
 
+// ── stuck registrations (any time; lib/registration.mjs) ────────────────────
+
+let lastRegistrationCheckAt = 0;
+
+async function bootstrapAnswers(origin) {
+  try {
+    const res = await fetch(`${origin}/health`, { signal: AbortSignal.timeout(15000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function registrationWatch(desired, observed) {
+  if (Date.now() - lastRegistrationCheckAt < 5 * 60 * 1000) return;
+  lastRegistrationCheckAt = Date.now();
+  for (const gen of desired.generations) {
+    if (gen.state === 'retired') continue;
+    const c = observed.managed.find((x) => x.labels[GENERATION_LABEL] === gen.id && x.running);
+    if (!c) continue;
+    try {
+      const info = await docker.inspectContainer(c.id);
+      const startedAt = Date.parse(info?.State?.StartedAt || '') || Date.now();
+      const text = await docker.logs(c.id, { since: nowUnix() - 31 * 60, tail: 'all', timestamps: true });
+      const g = (state.generations[gen.id] ||= {});
+      const v = registrationVerdict(putErrors(text), { now: Date.now(), startedAt, lastRestartAt: g.lastRegistrationRestart ? Date.parse(g.lastRegistrationRestart) : null });
+      if (!v.restart) continue;
+      if (v.bootstrap && !(await bootstrapAnswers(v.bootstrap))) {
+        log(`${gen.id}: bootstrap registrations refused (${v.reason}), but ${v.bootstrap} does not answer either; not restarting`);
+        continue;
+      }
+      if (cfg.dryRun) { log(`DRY RUN: would restart ${gen.id}: bootstrap registrations refused (${v.reason})`); continue; }
+      log(`${gen.id}: restarting the conductor: bootstrap registrations refused (${v.reason})`);
+      await docker.request('POST', `/containers/${c.id}/restart?t=90`, { timeoutMs: 150000 });
+      g.lastRegistrationRestart = new Date().toISOString();
+      remember(state, { event: 'registration_restart', generation: gen.id, reason: v.reason });
+      persist();
+    } catch (e) {
+      log(`${gen.id}: registration check skipped (${e.message})`);
+    }
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────
 
 async function report(desired, observed) {
@@ -594,6 +642,7 @@ async function tick() {
     const after = results.length ? await observe() : observed;
     await applyAdvisories(manifest, desired, after, isWindow);
     await upkeep(desired, after);
+    await registrationWatch(desired, after);
     if (Date.now() - lastReportAt >= cfg.reportMs) { await report(desired, after); lastReportAt = Date.now(); }
     current = { manifest, actions: results, waiting, lastTick: new Date().toISOString(), lastError: null };
     if (!retiredPrevious) await retirePreviousAgent();

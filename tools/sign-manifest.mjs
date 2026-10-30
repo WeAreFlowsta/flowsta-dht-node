@@ -121,22 +121,25 @@ if (local) {
   console.log(`signing with the local key as ${SIGNER_DID} (${channel} channel)`);
   sigBytes = cryptoSign(null, Buffer.from(statement, 'utf8'), local.privateKey);
 } else {
-// The Vault signs for linked origins only.
+// The Vault signs for linked origins only. The tool's own app key is kept
+// between runs (a fresh key each run made every run a first run, and left a
+// new "Flowsta Release Tool" link in the Vault each time; found 2026-10-25).
 const status = await fetch(`${VAULT}/status`).then((r) => r.json()).catch(() => null);
 if (!status) throw new Error(`no Vault at ${VAULT}; open Flowsta Vault and unlock it`);
 if (!status.unlocked) throw new Error('the Vault is locked; unlock it first');
-const linked = await fetch(`${VAULT}/link-status`, { headers: { Origin: ORIGIN } }).then((r) => r.json()).catch(() => ({ linked: false }));
+const toolKeyFile = process.env.FLOWSTA_RELEASE_TOOL_KEY || path.join(process.env.HOME || '.', '.config', 'flowsta', 'release-tool.key');
+const toolKey = localKey(toolKeyFile);
+const appKey = toolKey.did.replace(/^did:flowsta:/, '');
+const linked = await fetch(`${VAULT}/link-status?app_agent_pub_key=${encodeURIComponent(appKey)}`, { headers: { Origin: ORIGIN } }).then((r) => r.json()).catch(() => ({ linked: false }));
 if (!linked.linked) {
   const clientId = process.env.FLOWSTA_RELEASE_CLIENT_ID;
   if (!clientId) throw new Error('first run: set FLOWSTA_RELEASE_CLIENT_ID (register "Flowsta Release Tool" at dev.flowsta.com)');
-  const raw = generateKeyPairSync('ed25519').publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
-  const appKey = agentKeyOf(raw);
   console.log('linking the release tool with the Vault (approve it there)...');
   const r = await fetch(`${VAULT}/link-identity`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ app_name: 'Flowsta Release Tool', client_id: clientId, app_agent_pub_key: appKey }) });
   if (!r.ok) throw new Error(`link-identity refused: ${r.status} ${await r.text()}`);
 }
 
-console.log('asking the Vault to sign (approve it there; check the channel, sequence and digests against the lines above)...');
+console.log('asking the Vault to sign (approve it there within ten minutes; check the channel, sequence and digests against the lines above)...');
 const signRes = await fetch(`${VAULT}/sign-node-manifest`, {
   method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
   body: JSON.stringify({ manifest }),
