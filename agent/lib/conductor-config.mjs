@@ -6,8 +6,15 @@
  * 0.6: bootstrap_url + signal_url + relay_url (the signal server is the
  *      bootstrap host; relay as the FQDN-with-dot form).
  * 0.7: no signal_url (the field is rejected), relay_url = the bootstrap host,
- *      request_timeout_s under network, db_sync_level.
+ *      request_timeout_s under network, db_sync_level, and the gossip cap:
+ *      Holochain 0.7.1 drops any gossip exchange that offers more than about
+ *      10,900 op ids ("too many SQL variables"), so two peers with a large
+ *      difference never converge. Capping the bytes per exchange keeps every
+ *      exchange under that; each conductor's own value bounds what it receives.
  */
+
+/** The 0.7 gossip cap, in bytes (the same value the apps use). */
+export const GOSSIP_OP_BYTES_07 = 1048576;
 export function holochainLine(version) {
   const m = /^(\d+)\.(\d+)/.exec(version);
   if (!m) throw new Error(`bad holochain version "${version}"`);
@@ -49,6 +56,7 @@ export function renderConductorConfig(generation, { authBootstrap, authRelay, tr
   } else {
     lines.push(`  relay_url: ${yamlStr(`https://${host}./`)}`);
     lines.push('  request_timeout_s: 60');
+    lines.push('  advanced:', '    k2Gossip:', `      maxGossipOpBytes: ${GOSSIP_OP_BYTES_07}`, `      maxRequestGossipOpBytes: ${GOSSIP_OP_BYTES_07}`);
   }
   if (authBootstrap) lines.push(`  base64_auth_material_bootstrap: ${yamlStr(authBootstrap)}`);
   if (authRelay) lines.push(`  base64_auth_material_relay: ${yamlStr(authRelay)}`);

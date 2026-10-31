@@ -98,6 +98,8 @@ test('conductor config: 0.6 keeps signal_url, 0.7 has none and carries request_t
   assert.match(c7, /relay_url: "https:\/\/bootstrap-7\.flowsta\.com\.\/"/);
   assert.match(c7, /request_timeout_s: 60/);
   assert.match(c7, /db_sync_level: Normal/);
+  assert.match(c7, /\n  advanced:\n    k2Gossip:\n      maxGossipOpBytes: 1048576\n      maxRequestGossipOpBytes: 1048576\n/);
+  assert.doesNotMatch(c6, /k2Gossip|maxGossipOpBytes/);
   assert.match(c7, /port: 4445/);
   for (const c of [c6, c7]) { assert.match(c, /lair_server_in_proc/); assert.match(c, /base64_auth_material_bootstrap: "AAA"/); }
 });
