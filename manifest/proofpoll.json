@@ -45,7 +45,7 @@
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:6a4482e2776ae346a6f4bfa61e60d0ab28fa9a55a395eed83e7a313e6bf95432"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:9cf38cfbfffd142fe061adfb508a5062f6c307acbc2ffb5f159bb4c389cb41e0"
   },
   "advisories": [
     {
@@ -59,6 +59,12 @@
       "severity": "security",
       "action": "update",
       "text": "Agent 2.0.8: a manifest for another channel is refused; DNA downloads are bounded to the API host; safer recoveries and self-updates."
+    },
+    {
+      "id": "agent-2-0-10-gossip-cap",
+      "severity": "routine",
+      "action": "notice",
+      "text": "Agent 2.0.10: the Holochain 0.7 conductor's config now caps each gossip exchange at 1 MiB, so two peers with a large difference still converge. The 0.7 conductor restarts once in your maintenance window to take it; nothing changes in what it stores."
     }
   ]
 }
