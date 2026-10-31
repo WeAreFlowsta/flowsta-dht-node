@@ -23,7 +23,9 @@
 
 services:
   agent:
-    image: ${AGENT_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node:2.0.7}
+    # The default is the current agent (2.0.9), pinned by digest; a node then
+    # follows its channel's manifest, which pins every later version.
+    image: ${AGENT_IMAGE:-us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:6a4482e2776ae346a6f4bfa61e60d0ab28fa9a55a395eed83e7a313e6bf95432}
     container_name: flowsta-agent
     network_mode: host
     restart: unless-stopped
