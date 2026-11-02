@@ -17,3 +17,24 @@ Image digests (2026-10-24, Cloud Build):
 | `flowsta-edgenode` | hc0.7.1 | `sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f` |
 
 **Channels and who signs them (2026-10-24).** `stable`: Team Flowsta's identity in the Vault, nothing else. `staging` and `proofpoll`: a local key on the release machine, trusted by the staging API (`NODE_MANIFEST_SIGNER_DID`) and by each node's `MANIFEST_SIGNER_DID`, until the Vault signs manifests itself; both channels are published through the staging API meanwhile. ProofPoll bundles come from the ProofPoll repository at its release tag (sha256-verified by the agent before install).
+
+# App release manifests
+
+`tools/release-manifest.mjs` does the same for an app's releases: one manifest per app, channel and release, listing the version and every installer and updater file with its size and SHA-256. The apps check it with [flowsta-update-check](https://github.com/WeAreFlowsta/flowsta-update-check) before installing an update.
+
+```
+node tools/release-manifest.mjs vault vault-v1.8.1 --dry-run   # print it, sign nothing
+node tools/release-manifest.mjs vault vault-v1.8.1             # sign in the Vault, upload
+```
+
+- It reads the finished release from GitHub. The SHA-256 of each file comes from GitHub's own asset digests, and the sidecar hashes from the `kit-hashes-<target>.json` files the release workflow publishes.
+- The Vault signs through `/sign-release-manifest`. Its dialog shows the app, version, channel, rollout and every file; compare them with what the tool printed before approving. The tool then checks the signature against Team Flowsta's identity.
+- Options:
+  - `--rollout <percent>` sets the rollout share;
+  - `--from <version>` makes installs older than that version install it first;
+  - `--changes-line` marks a release that moves data to another Holochain line;
+  - `--sequence N` confirms a jump in the sequence.
+- Where the manifest goes:
+  - **Stable:** `release-manifest.json` is uploaded to the release itself (installs read `releases/latest/download/`).
+  - **Beta:** it is also uploaded, with the release's `latest.json`, to the app's fixed beta pre-release (`vault-beta`).
+- It uses the same tool key and Vault link as the node manifest tool.
