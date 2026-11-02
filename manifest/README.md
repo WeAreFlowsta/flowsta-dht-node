@@ -6,6 +6,12 @@ Rules the agent enforces (see `agent/lib/manifest.mjs`): images pinned by digest
 
 `generation-holochain-0.7.json` is the 0.7.1 generation entry, to be added to a channel's `generations` once that channel has a bootstrap host running the kitsune2 0.5.x server (the 0.6 and 0.7 lines need different bootstrap servers; the bootstrap role in `docker-compose.yml` runs both behind an SNI proxy).
 
+**`memory_restart` (agent 2.0.11; optional).** When a conductor of a named generation holds more than `share` of the VM's memory (page cache excluded), the agent restarts it cleanly in that node's slot (`slots`: node label → `HH:MM`, node-local like `UPDATE_WINDOW`; 20 minutes long), at most once in `every_hours` (default 24, at least 6) and never within 6 hours of a start. A node without a slot never restarts for memory, except above `urgent_share` when that is set. Older agents ignore the block. Example:
+
+```json
+"memory_restart": { "generations": ["holochain-0.7"], "share": 0.45, "urgent_share": 0.6, "slots": { "europe-dht": "05:20", "singapore-dht": "05:50" } }
+```
+
 Image digests (2026-10-24, Cloud Build):
 
 | Image | Tag | Digest |

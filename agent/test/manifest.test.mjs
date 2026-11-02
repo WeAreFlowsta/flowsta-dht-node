@@ -121,3 +121,12 @@ test('bundle downloads: https, the API host only, bounded', () => {
   assert.match(downloadRefusal('nope', 'auth-api.flowsta.com'), /not a URL/);
   assert.equal(MAX_BUNDLE_BYTES, 64 * 1048576);
 });
+
+test('shape: a memory_restart block is checked; one without it is still accepted', () => {
+  const base = sampleManifest();
+  assert.equal(validateShape({ ...base, signature: { signer: 'x', sig: 'y' } }), null);
+  const good = { ...base, memory_restart: { generations: ['holochain-0.7'], share: 0.45, slots: { 'europe-dht': '05:20' } }, signature: { signer: 'x', sig: 'y' } };
+  assert.equal(validateShape(good), null);
+  const bad = { ...base, memory_restart: { generations: ['holochain-0.7'], share: 0.05, slots: {} }, signature: { signer: 'x', sig: 'y' } };
+  assert.match(validateShape(bad), /share must be between/);
+});

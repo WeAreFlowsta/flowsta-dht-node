@@ -110,6 +110,12 @@ export class Docker {
     try { return await this.request('GET', `/images/${encodeURIComponent(ref)}/json`); } catch (e) { if (e.status === 404) return null; throw e; }
   }
 
+  /** One stats sample (memory, cpu) of a running container. */
+  containerStats(id) { return this.request('GET', `/containers/${id}/stats?stream=false&one-shot=true`, { timeoutMs: 30000 }); }
+  listImages() { return this.request('GET', '/images/json'); }
+  /** Never forced: Docker refuses an image a container still uses. */
+  removeImage(id) { return this.request('DELETE', `/images/${encodeURIComponent(id)}?force=false&noprune=false`); }
+
   listVolumes() { return this.request('GET', '/volumes'); }
   createVolume(name, labels = {}) { return this.request('POST', '/volumes/create', { body: { Name: name, Labels: labels } }); }
 }
