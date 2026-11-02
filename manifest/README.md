@@ -19,6 +19,7 @@ Image digests (2026-10-24, Cloud Build):
 | `flowsta-dht-node` (agent) | 2.0.7 | `sha256:abf3f821aa249de5b954259433c29416c5fd8c1a002bebad4b9e529e99d95095` |
 | `flowsta-dht-node` (agent) | 2.0.9 | `sha256:6a4482e2776ae346a6f4bfa61e60d0ab28fa9a55a395eed83e7a313e6bf95432` |
 | `flowsta-dht-node` (agent) | 2.0.10 | `sha256:9cf38cfbfffd142fe061adfb508a5062f6c307acbc2ffb5f159bb4c389cb41e0` |
+| `flowsta-dht-node` (agent) | 2.0.11 | `sha256:0d438c808ee417777b0b8417100f36b0e52d9c506893b8e465bb5b5657be446b` |
 | `flowsta-edgenode` | hc0.6.1 | `sha256:900987b0daadd3fda65821c8855e06fac92398fe3872c53ac133bbfb1158d0f2` |
 | `flowsta-edgenode` | hc0.7.1 | `sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f` |
 
