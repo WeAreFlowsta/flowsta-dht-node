@@ -84,7 +84,7 @@
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:9cf38cfbfffd142fe061adfb508a5062f6c307acbc2ffb5f159bb4c389cb41e0"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:0d438c808ee417777b0b8417100f36b0e52d9c506893b8e465bb5b5657be446b"
   },
   "advisories": [
     {
@@ -104,6 +104,23 @@
       "severity": "routine",
       "action": "notice",
       "text": "Agent 2.0.10: the Holochain 0.7 conductor's config now caps each gossip exchange at 1 MiB, so two peers with a large difference still converge. The 0.7 conductor restarts once in your maintenance window to take it; nothing changes in what it stores."
+    },
+    {
+      "id": "agent-2-0-11",
+      "severity": "routine",
+      "action": "notice",
+      "text": "Agent 2.0.11: a 0.7 conductor holding more than 45 % of the VM's memory is restarted cleanly in the node's slot, at most once a day; each report carries the host's memory, swap, disk and kernel and the conductor's own memory, restarts and refused registrations; old images of our repositories are removed once a day."
     }
-  ]
+  ],
+  "memory_restart": {
+    "generations": [
+      "holochain-0.7"
+    ],
+    "share": 0.45,
+    "urgent_share": 0.6,
+    "slots": {
+      "europe-dht": "05:20",
+      "singapore-dht": "05:50"
+    }
+  }
 }
