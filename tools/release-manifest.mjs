@@ -14,7 +14,7 @@
 // Usage:
 //   node tools/release-manifest.mjs <app> <tag> [--rollout 100] [--from <version>]
 //        [--changes-line] [--sequence N] [--dry-run] [--no-upload] [--vault URL]
-//   <app>: vault (more as they adopt the updater).
+//   <app>: vault or proofpoll (more as they adopt the updater).
 //   --dry-run: print the manifest and its statement, sign nothing.
 //
 // The Vault signs for linked origins only: this tool uses the node manifest
@@ -34,10 +34,19 @@ const { canonicalJson } = await import('../agent/lib/canonical.mjs');
 
 const APPS = {
   vault: {
+    name: 'Flowsta Vault',
     app: 'com.flowsta.vault',
     repo: 'WeAreFlowsta/flowsta-vault-app',
     tagPrefix: 'vault-v',
     betaTag: 'vault-beta',
+    lines: ['holochain-0.6', 'holochain-0.7'],
+  },
+  proofpoll: {
+    name: 'ProofPoll',
+    app: 'com.proofpoll.app',
+    repo: 'WeAreFlowsta/ProofPoll',
+    tagPrefix: 'proofpoll-v',
+    betaTag: 'proofpoll-beta',
     lines: ['holochain-0.6', 'holochain-0.7'],
   },
 };
@@ -58,7 +67,7 @@ if (!cfg || !tag || tag.startsWith('--')) {
   process.exit(2);
 }
 if (!tag.startsWith(cfg.tagPrefix)) throw new Error(`${appName} tags start with ${cfg.tagPrefix}`);
-const { app: APP, repo: REPO, betaTag: BETA_TAG, lines: LINES } = cfg;
+const { name: NAME, app: APP, repo: REPO, betaTag: BETA_TAG, lines: LINES } = cfg;
 const dryRun = flag('dry-run');
 const upload = !flag('no-upload') && !dryRun;
 const VAULT = opt('vault', 'http://localhost:27777').replace(/\/$/, '');
@@ -205,7 +214,7 @@ fs.writeFileSync(lastSignedPath, body);
 console.log(`verified as Team Flowsta; written ${lastSignedPath}`);
 if (!upload) process.exit(0);
 
-// ---- Upload: the release itself (stable installs read the latest release's file), and for a beta the vault-beta pre-release too.
+// ---- Upload: the release itself (stable installs read the latest release's file), and for a beta the app's beta pre-release too.
 const replaceAsset = async (rel, name, data, type) => {
   for (const a of rel.assets.filter((x) => x.name === name)) await gh(`/repos/${REPO}/releases/assets/${a.id}`, { method: 'DELETE' });
   await gh(`https://uploads.github.com/repos/${REPO}/releases/${rel.id}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': type }, body: data });
@@ -221,7 +230,7 @@ if (channel === 'beta') {
     beta = await (await gh(`/repos/${REPO}/releases`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tag_name: BETA_TAG, name: 'Beta channel (for the Vault updater)', body: 'Holds the beta channel\'s two updater files. The installers are on each beta\'s own release.', prerelease: true }),
+      body: JSON.stringify({ tag_name: BETA_TAG, name: `Beta channel (for the ${NAME} updater)`, body: 'Holds the beta channel\'s two updater files. The installers are on each beta\'s own release.', prerelease: true }),
     })).json();
   }
   await replaceAsset(beta, 'latest.json', latestBody, 'application/json');
