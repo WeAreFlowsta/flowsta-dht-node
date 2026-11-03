@@ -11,9 +11,13 @@
  * maintenance window and are verified; a failed change is rolled back to the
  * previous container. Every generation reports its health to the API.
  *
- * One repair it makes on its own, any time: a conductor whose bootstrap
+ * Two repairs it makes on its own: a conductor whose bootstrap
  * registrations have been refused steadily for 30 minutes is restarted
- * (lib/registration.mjs), at most once in 6 hours.
+ * (lib/registration.mjs), at most once in 6 hours; and, where the manifest's
+ * `memory_restart` gives this node a slot, a conductor holding more than its
+ * share of the VM's memory is restarted in that slot, at most once a day
+ * (lib/memory.mjs). Once a day in the window it removes old images of the
+ * repositories the manifest names (lib/prune.mjs).
  *
  * What it never does: delete a data volume, uninstall an app, accept an
  * inbound connection, act on an unsigned or older manifest.
@@ -34,6 +38,8 @@
  *   CONDUCTOR_LAIR_ROOT       lair_root (default <CONDUCTOR_DATA_ROOT>/ks)
  *   CONDUCTOR_MEMORY          memory cap for each conductor container, e.g. 1400m (default none);
  *   CONDUCTOR_MEMORY_SWAP     memory+swap cap, e.g. 2400m (default twice the memory cap)
+ *   CONDUCTOR_ENV             glibc malloc settings for the conductors, `;`-separated (lib/conductor-env.mjs)
+ *   CONDUCTOR_ENV_FOR         the generations CONDUCTOR_ENV applies to (default holochain-0.7)
  *   CONDUCTOR_ALLOWED_ORIGINS admin-interface origins, comma-separated (default flowsta-agent,flowsta-auth-api)
  *   LEGACY_CONDUCTOR_NAMES    containers the agent may adopt (default flowsta-conductor,holochain-conductor)
  *   LEGACY_DATA_VOLUMES       volumes of an already-removed conductor the agent may adopt
@@ -48,7 +54,6 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { Docker, conductorContainerSpec } from './lib/docker.mjs';
 import { verifyManifest, DEFAULT_SIGNER_DID } from './lib/manifest.mjs';
 import { DEFAULT_ALLOWED_ORIGINS } from './lib/conductor-config.mjs';
@@ -61,6 +66,10 @@ import { reconcileDnas } from './lib/dnas.mjs';
 import { verifyConductor, connectAdmin, isRunning } from './lib/verify.mjs';
 import { probeConductor } from '../updater/network-probe.mjs';
 import { putErrors, registrationVerdict } from './lib/registration.mjs';
+import { memoryVerdict } from './lib/memory.mjs';
+import { readHost, containerMemory } from './lib/host.mjs';
+import { prunableImages } from './lib/prune.mjs';
+import { parseConductorEnv, configShaOf } from './lib/conductor-env.mjs';
 
 const COMMUNITY_AUTH_MATERIAL = 'eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0=';
 const TEMPLATE_DIR = '/usr/local/share/holochain';
@@ -88,6 +97,8 @@ const cfg = {
   allowedOrigins: env.CONDUCTOR_ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS,
   memoryBytes: parseSize(env.CONDUCTOR_MEMORY),
   memorySwapBytes: parseSize(env.CONDUCTOR_MEMORY_SWAP),
+  conductorEnv: parseConductorEnv(env.CONDUCTOR_ENV),
+  conductorEnvFor: (env.CONDUCTOR_ENV_FOR || 'holochain-0.7').split(',').map((s) => s.trim()).filter(Boolean),
 };
 if (!cfg.apiUrl) { console.error('API_URL is required'); process.exit(1); }
 // The manifest is safe over http (it is signed); the node secret is not.
@@ -249,7 +260,8 @@ function desiredFrom(manifest, auth) {
     agentImage: manifest.agent.image,
     generations: manifest.generations.map((g) => {
       const config = renderConductorConfig(g, { ...auth, allowedOrigins: cfg.allowedOrigins });
-      return { id: g.id, state: g.state, image: g.conductor.image, adminPort: g.conductor.admin_port, config, configSha: crypto.createHash('sha256').update(config).digest('hex'), adopts: g.adopts_legacy_conductor === true, dnas: g.dnas, holochain: g.holochain };
+      const conductorEnv = cfg.conductorEnvFor.includes(g.id) ? cfg.conductorEnv : [];
+      return { id: g.id, state: g.state, image: g.conductor.image, adminPort: g.conductor.admin_port, config, configSha: configShaOf(config, conductorEnv), env: conductorEnv, adopts: g.adopts_legacy_conductor === true, dnas: g.dnas, holochain: g.holochain };
     }),
   };
 }
@@ -261,7 +273,7 @@ async function createConductor(gen, { dataVolume, dataBind }, sequence) {
   await docker.pullImage(gen.image);
   if (!dataBind) await docker.createVolume(dataVolume, { [MANAGED_LABEL]: 'agent', [GENERATION_LABEL]: gen.id }).catch((e) => { if (e.status !== 409) throw e; });
   const labels = { [MANAGED_LABEL]: 'agent', [GENERATION_LABEL]: gen.id, [CONFIG_LABEL]: gen.configSha, [IMAGE_LABEL]: gen.image, [SEQUENCE_LABEL]: String(sequence) };
-  const created = await docker.createContainer(name, conductorContainerSpec({ image: gen.image, generation: gen.id, dataVolume, dataBind, labels, memoryBytes: cfg.memoryBytes, memorySwapBytes: cfg.memorySwapBytes }));
+  const created = await docker.createContainer(name, conductorContainerSpec({ image: gen.image, generation: gen.id, dataVolume, dataBind, labels, env: gen.env || [], memoryBytes: cfg.memoryBytes, memorySwapBytes: cfg.memorySwapBytes }));
   try {
     await docker.putArchive(created.Id, TEMPLATE_DIR, tarOfFile(TEMPLATE_FILE, gen.config));
     await docker.startContainer(created.Id);
@@ -560,7 +572,10 @@ async function registrationWatch(desired, observed) {
       const startedAt = Date.parse(info?.State?.StartedAt || '') || Date.now();
       const text = await docker.logs(c.id, { since: nowUnix() - 31 * 60, tail: 'all', timestamps: true });
       const g = (state.generations[gen.id] ||= {});
-      const v = registrationVerdict(putErrors(text), { now: Date.now(), startedAt, lastRestartAt: g.lastRegistrationRestart ? Date.parse(g.lastRegistrationRestart) : null });
+      const errors = putErrors(text);
+      // For the report: refused registrations in the last 30 minutes.
+      g.putErrors30m = errors.filter((e) => Date.now() - e.at <= 30 * 60 * 1000).length;
+      const v = registrationVerdict(errors, { now: Date.now(), startedAt, lastRestartAt: g.lastRegistrationRestart ? Date.parse(g.lastRegistrationRestart) : null });
       if (!v.restart) continue;
       if (v.bootstrap && !(await bootstrapAnswers(v.bootstrap))) {
         log(`${gen.id}: bootstrap registrations refused (${v.reason}), but ${v.bootstrap} does not answer either; not restarting`);
@@ -575,6 +590,77 @@ async function registrationWatch(desired, observed) {
     } catch (e) {
       log(`${gen.id}: registration check skipped (${e.message})`);
     }
+  }
+}
+
+// ── conductor size (any time, in the node's slot; lib/memory.mjs) ───────────
+
+let lastMemoryCheckAt = 0;
+
+async function memoryWatch(manifest, desired, observed) {
+  if (Date.now() - lastMemoryCheckAt < 5 * 60 * 1000) return;
+  lastMemoryCheckAt = Date.now();
+  const host = readHost(cfg.stateDir);
+  const totalBytes = host.mem_total || os.totalmem();
+  for (const gen of desired.generations) {
+    if (gen.state === 'retired') continue;
+    const c = observed.managed.find((x) => x.labels[GENERATION_LABEL] === gen.id && x.running);
+    if (!c) continue;
+    try {
+      const [stats, info] = await Promise.all([docker.containerStats(c.id), docker.inspectContainer(c.id)]);
+      const usedBytes = containerMemory(stats);
+      const g = (state.generations[gen.id] ||= {});
+      const v = memoryVerdict({ usedBytes, totalBytes }, {
+        policy: manifest.memory_restart,
+        label: cfg.label,
+        generation: gen.id,
+        now: new Date(),
+        startedAt: Date.parse(info?.State?.StartedAt || '') || Date.now(),
+        lastRestartAt: g.lastMemoryRestart ? Date.parse(g.lastMemoryRestart) : null,
+      });
+      g.memory = { used_bytes: usedBytes, share: v.share === null ? null : Math.round(v.share * 1000) / 1000, verdict: v.reason, at: new Date().toISOString() };
+      if (!v.restart) continue;
+      if (cfg.dryRun) { log(`DRY RUN: would restart ${gen.id}: ${v.reason}`); continue; }
+      log(`${gen.id}: restarting the conductor for its size: ${v.reason}`);
+      await docker.request('POST', `/containers/${c.id}/restart?t=90`, { timeoutMs: 150000 });
+      g.lastMemoryRestart = new Date().toISOString();
+      remember(state, { event: 'memory_restart', generation: gen.id, reason: v.reason, used_bytes: usedBytes });
+      persist();
+    } catch (e) {
+      log(`${gen.id}: memory check skipped (${e.message})`);
+    }
+  }
+}
+
+// ── old images (once a day, in the window; lib/prune.mjs) ──────────────────
+
+async function pruneImages(manifest) {
+  if (state.lastPruneAt && Date.now() - Date.parse(state.lastPruneAt) < 24 * 3600 * 1000) return;
+  state.lastPruneAt = new Date().toISOString();
+  persist();
+  try {
+    const [images, containers] = await Promise.all([docker.listImages(), docker.listContainers({ all: true })]);
+    const prunable = prunableImages({ images, containers, manifest, keep: [state.agent?.previousImage] });
+    if (prunable.length === 0) return;
+    if (cfg.dryRun) { log(`DRY RUN: would remove ${prunable.length} old image(s): ${prunable.map((p) => p.refs[0]).join(', ')}`); return; }
+    let freed = 0;
+    const removed = [];
+    for (const p of prunable) {
+      try {
+        await docker.removeImage(p.id);
+        freed += p.size;
+        removed.push(p.refs[0]);
+      } catch (e) {
+        log(`old image ${p.refs[0]} kept (${e.message})`);
+      }
+    }
+    if (removed.length) {
+      log(`removed ${removed.length} old image(s), ${Math.round(freed / 1048576)} MB: ${removed.join(', ')}`);
+      remember(state, { event: 'images_pruned', count: removed.length, bytes: freed });
+      persist();
+    }
+  } catch (e) {
+    log(`image cleanup skipped (${e.message})`);
   }
 }
 
@@ -594,7 +680,20 @@ async function report(desired, observed) {
       const g = (state.generations[gen.id] ||= {});
       // The app list the next replacement must carry, kept while the conductor can be asked.
       try { g.apps = (await admin.listApps({})).map((a) => ({ id: a.installed_app_id, running: isRunning(a.status) })); persist(); } catch {}
-      const body = { ...base, generation: gen.id, holochain: gen.holochain, conductor_digest: (c.image.split('@')[1] || null), agent_digest: (observed.agentImage?.split('@')[1] || null), manifest_sequence: state.manifest_sequence, manifest_issued_at: state.manifest?.issued_at || null, channel: cfg.channel, signer: cfg.signerDid, last_change: g.lastChange || null, last_rollback: g.lastRollback || null, advisories_applied: state.advisories_applied.slice(-20) };
+      // The node and this conductor, beside the network view (agent 2.0.11).
+      const info = await docker.inspectContainer(c.id).catch(() => null);
+      const conductor = {
+        memory_bytes: g.memory?.used_bytes ?? null,
+        memory_share: g.memory?.share ?? null,
+        restarts: info?.RestartCount ?? null,
+        oom_killed: info?.State?.OOMKilled ?? null,
+        started_at: info?.State?.StartedAt || null,
+        put_errors_30m: g.putErrors30m ?? null,
+        last_registration_restart: g.lastRegistrationRestart || null,
+        last_memory_restart: g.lastMemoryRestart || null,
+        memory_verdict: g.memory?.verdict || null,
+      };
+      const body = { ...base, host: readHost(cfg.stateDir), conductor, generation: gen.id, holochain: gen.holochain, conductor_digest: (c.image.split('@')[1] || null), agent_digest: (observed.agentImage?.split('@')[1] || null), manifest_sequence: state.manifest_sequence, manifest_issued_at: state.manifest?.issued_at || null, channel: cfg.channel, signer: cfg.signerDid, last_change: g.lastChange || null, last_rollback: g.lastRollback || null, advisories_applied: state.advisories_applied.slice(-20) };
       const headers = { 'Content-Type': 'application/json' };
       if (cfg.nodeSecret) headers['X-Node-Secret'] = cfg.nodeSecret;
       const res = await fetch(`${cfg.apiUrl}/api/v1/vault/node/report`, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -643,6 +742,8 @@ async function tick() {
     await applyAdvisories(manifest, desired, after, isWindow);
     await upkeep(desired, after);
     await registrationWatch(desired, after);
+    await memoryWatch(manifest, desired, after);
+    if (isWindow && !waiting.length && retiredPrevious) await pruneImages(manifest);
     if (Date.now() - lastReportAt >= cfg.reportMs) { await report(desired, after); lastReportAt = Date.now(); }
     current = { manifest, actions: results, waiting, lastTick: new Date().toISOString(), lastError: null };
     if (!retiredPrevious) await retirePreviousAgent();

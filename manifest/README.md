@@ -6,6 +6,12 @@ Rules the agent enforces (see `agent/lib/manifest.mjs`): images pinned by digest
 
 `generation-holochain-0.7.json` is the 0.7.1 generation entry, to be added to a channel's `generations` once that channel has a bootstrap host running the kitsune2 0.5.x server (the 0.6 and 0.7 lines need different bootstrap servers; the bootstrap role in `docker-compose.yml` runs both behind an SNI proxy).
 
+**`memory_restart` (agent 2.0.11; optional).** When a conductor of a named generation holds more than `share` of the VM's memory (page cache excluded), the agent restarts it cleanly in that node's slot (`slots`: node label → `HH:MM`, node-local like `UPDATE_WINDOW`; 20 minutes long), at most once in `every_hours` (default 24, at least 6) and never within 6 hours of a start. A node without a slot never restarts for memory, except above `urgent_share` when that is set. Older agents ignore the block. Example:
+
+```json
+"memory_restart": { "generations": ["holochain-0.7"], "share": 0.45, "urgent_share": 0.6, "slots": { "europe-dht": "05:20", "singapore-dht": "05:50" } }
+```
+
 Image digests (2026-10-24, Cloud Build):
 
 | Image | Tag | Digest |
@@ -13,6 +19,7 @@ Image digests (2026-10-24, Cloud Build):
 | `flowsta-dht-node` (agent) | 2.0.7 | `sha256:abf3f821aa249de5b954259433c29416c5fd8c1a002bebad4b9e529e99d95095` |
 | `flowsta-dht-node` (agent) | 2.0.9 | `sha256:6a4482e2776ae346a6f4bfa61e60d0ab28fa9a55a395eed83e7a313e6bf95432` |
 | `flowsta-dht-node` (agent) | 2.0.10 | `sha256:9cf38cfbfffd142fe061adfb508a5062f6c307acbc2ffb5f159bb4c389cb41e0` |
+| `flowsta-dht-node` (agent) | 2.0.11 | `sha256:0d438c808ee417777b0b8417100f36b0e52d9c506893b8e465bb5b5657be446b` |
 | `flowsta-edgenode` | hc0.6.1 | `sha256:900987b0daadd3fda65821c8855e06fac92398fe3872c53ac133bbfb1158d0f2` |
 | `flowsta-edgenode` | hc0.7.1 | `sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f` |
 

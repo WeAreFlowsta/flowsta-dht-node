@@ -237,6 +237,8 @@ Create a `.env` file in the repo root:
 | `REPORT_DISABLED` | No | `0` | Set `1` to send no health reports |
 | `BOOTSTRAP_AUTH_MATERIAL`, `RELAY_AUTH_MATERIAL` | No | community client id | Bootstrap/relay auth material in the rendered conductor configs |
 | `CONDUCTOR_MEMORY` | No | none | Memory cap per conductor container, e.g. `1400m`; `CONDUCTOR_MEMORY_SWAP` the memory+swap cap (default twice) |
+| `CONDUCTOR_ENV` | No | none | glibc malloc settings for the conductor containers, `;`-separated (`GLIBC_TUNABLES`, `MALLOC_ARENA_MAX`, `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TRIM_THRESHOLD_`, `MALLOC_TOP_PAD_` only). Counts in the conductor's config hash: changing it replaces the conductor in the window |
+| `CONDUCTOR_ENV_FOR` | No | `holochain-0.7` | The generations `CONDUCTOR_ENV` applies to, comma-separated |
 | `CONDUCTOR_ALLOWED_ORIGINS` | No | `flowsta-agent,flowsta-auth-api` | Origins the conductor's admin interface answers (comma-separated); add your own tools here |
 | `AGENT_IMAGE` | No | the published agent image | Only for developing the agent itself |
 | `DRY_RUN` | No | `0` | Set `1` to plan and log only; the agent changes nothing. Useful for the first start on an existing node |
