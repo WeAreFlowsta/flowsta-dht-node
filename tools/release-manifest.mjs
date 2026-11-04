@@ -86,6 +86,8 @@ const gh = async (url, init = {}) => {
 
 const release = await (await gh(`/repos/${REPO}/releases/tags/${encodeURIComponent(tag)}`)).json();
 if (!release.id) throw new Error(`no release ${tag} in ${REPO}`);
+// A draft's download links are temporary untagged-... addresses.
+if (release.draft) throw new Error(`${tag} is still a draft: publish it first`);
 const version = tag.slice(cfg.tagPrefix.length);
 const channel = release.prerelease ? 'beta' : 'stable';
 
@@ -118,6 +120,22 @@ for (const asset of release.assets) {
 }
 files.sort((a, b) => `${a.platform} ${a.kind}`.localeCompare(`${b.platform} ${b.kind}`));
 if (files.length === 0) throw new Error(`${tag} has no installers or updater files`);
+
+// The updater's version file must send each platform to one of these files
+// at its published address, and each must download: links written while the
+// release was a draft point at an untagged-... address that stops working.
+const latestAsset = release.assets.find((a) => a.name === 'latest.json');
+if (!latestAsset) throw new Error(`${tag} has no latest.json (the release workflow writes it)`);
+const latestBody = await (await fetch(latestAsset.browser_download_url)).text();
+const latestJson = JSON.parse(latestBody);
+if (latestJson.version !== version) throw new Error(`${tag}'s latest.json is for ${latestJson.version}, not ${version}`);
+const fileUrls = new Set(files.map((f) => f.url));
+for (const [key, p] of Object.entries(latestJson.platforms ?? {})) {
+  if (!fileUrls.has(p.url)) throw new Error(`${tag}'s latest.json sends ${key} to ${p.url}, not one of this release's files`);
+  const r = await fetch(p.url, { headers: { Range: 'bytes=0-0' } });
+  await r.body?.cancel();
+  if (!r.ok) throw new Error(`${tag}'s latest.json sends ${key} to ${p.url}: ${r.status}`);
+}
 
 const kit = [];
 for (const asset of release.assets.filter((a) => /^kit-hashes-.+\.json$/.test(a.name))) {
@@ -222,9 +240,6 @@ const replaceAsset = async (rel, name, data, type) => {
 await replaceAsset(release, 'release-manifest.json', body, 'application/json');
 console.log(`uploaded release-manifest.json to ${tag}`);
 if (channel === 'beta') {
-  const latest = release.assets.find((a) => a.name === 'latest.json');
-  if (!latest) throw new Error(`${tag} has no latest.json (the release workflow writes it)`);
-  const latestBody = await (await fetch(latest.browser_download_url)).text();
   let beta = await (await gh(`/repos/${REPO}/releases/tags/${BETA_TAG}`)).json();
   if (!beta.id) {
     beta = await (await gh(`/repos/${REPO}/releases`, {
