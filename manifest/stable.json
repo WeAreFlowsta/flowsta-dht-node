@@ -79,6 +79,13 @@
           "version": "1.5",
           "sha256": "0703e4dc066f7dee97abcae9e408bbd5dcd4e220ab03a1de58f1bd324abdf61a",
           "url": "https://auth-api.flowsta.com/api/v1/vault/node/dna-bundle/signing/1.5"
+        },
+        {
+          "app_id": "flowsta_signing_v1_6",
+          "type": "signing",
+          "version": "1.6",
+          "sha256": "4fcc9fb08f9be93ceaa111d6efdbb9350c928efd710cda85c29dd4d39e929c1f",
+          "url": "https://auth-api.flowsta.com/api/v1/vault/node/dna-bundle/signing/1.6"
         }
       ]
     }
