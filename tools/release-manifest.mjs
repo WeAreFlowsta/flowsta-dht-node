@@ -30,6 +30,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { postToVault } from './vault-post.mjs';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const require = createRequire(path.join(root, 'updater', 'package.json'));
@@ -279,7 +280,7 @@ if (!linked.linked) {
   if (!r.ok) throw new Error(`link-identity refused: ${r.status} ${await r.text()}`);
 }
 console.log('asking the Vault to sign (approve it there within ten minutes; check the version, channel and hashes against the lines above)...');
-const signRes = await fetch(`${VAULT}/sign-release-manifest`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ manifest }) });
+const signRes = await postToVault(`${VAULT}/sign-release-manifest`, ORIGIN, { manifest });
 if (!signRes.ok) throw new Error(`sign refused: ${signRes.status} ${await signRes.text()}`);
 const signed = await signRes.json();
 if (signed.statement !== statement) throw new Error(`the Vault signed a different statement:\n  vault ${signed.statement}\n  here  ${statement}`);

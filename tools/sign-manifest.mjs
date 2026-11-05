@@ -35,6 +35,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { postToVault } from './vault-post.mjs';
 import { generateKeyPairSync, createPrivateKey, createPublicKey, sign as cryptoSign } from 'node:crypto';
 import { statementFor, verifyManifest, didToVerifyKey, DEFAULT_SIGNER_DID } from '../agent/lib/manifest.mjs';
 
@@ -140,10 +141,7 @@ if (!linked.linked) {
 }
 
 console.log('asking the Vault to sign (approve it there within ten minutes; check the channel, sequence and digests against the lines above)...');
-const signRes = await fetch(`${VAULT}/sign-node-manifest`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
-  body: JSON.stringify({ manifest }),
-});
+const signRes = await postToVault(`${VAULT}/sign-node-manifest`, ORIGIN, { manifest });
 if (!signRes.ok) throw new Error(`sign refused: ${signRes.status} ${await signRes.text()}`);
 const signed = await signRes.json();
 // The Vault derived the statement itself; it must be the one computed here.
