@@ -7,10 +7,16 @@
 # Usage:
 #   gcloud builds submit --config=cloudbuild.yaml \
 #     --substitutions=_VERSION=2.0.0 --project=flowsta-475001
+#
+# The ProofPoll node's image also carries the carrier: add
+#   _CARRIER_URL=<the release asset>,_CARRIER_SHA256=<its sha256>
+# (agent/lib/carrier.mjs; the Dockerfile refuses a download that does not match).
 
 substitutions:
   _VERSION: 'dev'
   _REPO: 'us-docker.pkg.dev/flowsta-475001/public'
+  _CARRIER_URL: ''
+  _CARRIER_SHA256: ''
 
 steps:
   - name: 'gcr.io/cloud-builders/docker'
@@ -18,6 +24,10 @@ steps:
       - 'build'
       - '--build-arg'
       - 'AGENT_VERSION=${_VERSION}'
+      - '--build-arg'
+      - 'CARRIER_URL=${_CARRIER_URL}'
+      - '--build-arg'
+      - 'CARRIER_SHA256=${_CARRIER_SHA256}'
       - '-t'
       - '${_REPO}/flowsta-dht-node:${_VERSION}'
       - '.'

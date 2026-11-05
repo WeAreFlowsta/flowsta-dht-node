@@ -17,7 +17,10 @@
  * `memory_restart` gives this node a slot, a conductor holding more than its
  * share of the VM's memory is restarted in that slot, at most once a day
  * (lib/memory.mjs). Once a day in the window it removes old images of the
- * repositories the manifest names (lib/prune.mjs).
+ * repositories the manifest names (lib/prune.mjs). Where the manifest has a
+ * `carrier` block (the ProofPoll node), it runs the ProofPoll carrier on its
+ * schedule and restarts the 0.7 conductor after a pass that wrote
+ * (lib/carrier.mjs).
  *
  * What it never does: delete a data volume, uninstall an app, accept an
  * inbound connection, act on an unsigned or older manifest.
@@ -49,6 +52,7 @@
  *   STATUS_PORT               local status page on 127.0.0.1 (default 8787; 0 = off)
  *   TICK_SECONDS / REPORT_INTERVAL    default 60 / 600
  *   DRY_RUN                   1 = plan and log, change nothing (no container, DNA or advisory action)
+ *   CARRIER_BIN               the ProofPoll carrier (default /app/bin/proofpoll-carrier; runs only where the manifest has `carrier`)
  */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -70,6 +74,7 @@ import { memoryVerdict } from './lib/memory.mjs';
 import { readHost, containerMemory, parseSwapCurrent } from './lib/host.mjs';
 import { prunableImages } from './lib/prune.mjs';
 import { parseConductorEnv, configShaOf } from './lib/conductor-env.mjs';
+import { carrierNotDue, carrierHeldBack, carrierArgs, parseCarrierReport, carrierSummary, restartAfterPass, tail, startPass, stopPass, MAX_RUN_MS } from './lib/carrier.mjs';
 
 const COMMUNITY_AUTH_MATERIAL = 'eyJjbGllbnRfaWQiOiJmbG93c3RhX2FwcF83NTRhODlmMDg3MGE5ZGRhZjhhODhhNTFhYzcwYzAxMzQwMWJhNDhiN2QyMTk1MTdhZjlkNzZhYzBjNzU2N2ExIn0=';
 const TEMPLATE_DIR = '/usr/local/share/holochain';
@@ -99,6 +104,7 @@ const cfg = {
   memorySwapBytes: parseSize(env.CONDUCTOR_MEMORY_SWAP),
   conductorEnv: parseConductorEnv(env.CONDUCTOR_ENV),
   conductorEnvFor: (env.CONDUCTOR_ENV_FOR || 'holochain-0.7').split(',').map((s) => s.trim()).filter(Boolean),
+  carrierBin: env.CARRIER_BIN || '/app/bin/proofpoll-carrier',
 };
 if (!cfg.apiUrl) { console.error('API_URL is required'); process.exit(1); }
 // The manifest is safe over http (it is signed); the node secret is not.
@@ -650,6 +656,90 @@ async function containerSwap(id) {
   }
 }
 
+// ── the ProofPoll carrier (where the manifest has `carrier`; lib/carrier.mjs) ─
+
+/** The pass under way: { child, policy, startedAt, endedAt, stdout, stderr, done, stopping }. */
+let carrierRun = null;
+
+async function carrierWatch(manifest, desired, observed, changed) {
+  const c = (state.carrier ||= {});
+  if (carrierRun) {
+    if (carrierRun.done) return carrierFinished(desired, observed);
+    if (Date.now() - carrierRun.startedAt > MAX_RUN_MS && !carrierRun.stopping) {
+      log('carrier: the pass has run for 2 hours; stopping it');
+      stopPass(carrierRun);
+    }
+    return;
+  }
+  const policy = manifest.carrier;
+  const now = Date.now();
+  const notDue = carrierNotDue(policy, {
+    now,
+    lastRunAt: c.last_run_at ? Date.parse(c.last_run_at) : null,
+    lastSkipAt: c.last_skip_at ? Date.parse(c.last_skip_at) : null,
+    binary: fs.existsSync(cfg.carrierBin),
+  });
+  if (notDue) {
+    // Said once when it changes (a manifest with the block but no binary, an end date passed).
+    if (policy && notDue !== c.not_due && !/less than/.test(notDue)) log(`carrier: not running (${notDue})`);
+    c.not_due = notDue;
+    return;
+  }
+  const genFor = (line) => desired.generations.find((g) => g.id === policy.lines[line]);
+  const startedAt = {};
+  const ports = {};
+  for (const line of ['v06', 'v07']) {
+    const g = genFor(line);
+    ports[line] = g?.adminPort;
+    const cont = g && g.state !== 'retired' && observed.managed.find((x) => x.labels[GENERATION_LABEL] === g.id && x.running);
+    const info = cont ? await docker.inspectContainer(cont.id).catch(() => null) : null;
+    startedAt[line] = Date.parse(info?.State?.StartedAt || '') || null;
+  }
+  const held = carrierHeldBack(policy, { now, startedAt, memAvailable: readHost(cfg.stateDir).mem_available, changed });
+  if (held) {
+    if (held !== c.held_back) log(`carrier: due, held back (${held}); trying again in 10 minutes`);
+    c.held_back = held;
+    c.last_skip_at = new Date(now).toISOString();
+    persist();
+    return;
+  }
+  const args = carrierArgs(policy, { port06: ports.v06, port07: ports.v07, origin: 'flowsta-agent', stateFile: path.join(cfg.stateDir, 'proofpoll-carrier.json') });
+  log(`carrier: starting a pass${policy.dry_run ? ' (dry run: counts only)' : ''}`);
+  carrierRun = startPass(cfg.carrierBin, args, policy, { now });
+  Object.assign(c, { last_run_at: new Date(now).toISOString(), last_skip_at: null, held_back: null, not_due: null });
+  persist();
+}
+
+/** A pass ended: log and keep what it did, then restart the 0.7 conductor if it wrote. */
+async function carrierFinished(desired, observed) {
+  const run = carrierRun;
+  carrierRun = null;
+  const c = state.carrier;
+  const { code, signal, error } = run.done;
+  const report = parseCarrierReport(run.stdout);
+  const exit = error ? 'error' : signal || code;
+  const secs = Math.round(((run.endedAt || Date.now()) - run.startedAt) / 1000);
+  log(`carrier: ${error ? `could not run (${error})` : carrierSummary(report, exit)} in ${secs} s`);
+  // stderr names each refused or failed record and why a pass stopped; counts only, no keys.
+  if (run.stderr.trim() && (exit !== 0 || report?.failed)) log(`carrier stderr: ${tail(run.stderr.trim(), 2000)}`);
+  Object.assign(c, { last_exit: exit, last_ended_at: new Date(run.endedAt || Date.now()).toISOString(), last_seconds: secs, last_report: report, passes: (c.passes || 0) + 1 });
+  remember(state, { event: 'carrier_pass', exit, seconds: secs, dry_run: !!report?.dry_run, wrote: !!report?.wrote, carried: report?.carried || null, failed: report?.failed ?? null, stopped: report?.stopped || null });
+  persist();
+  if (!restartAfterPass(run.policy, report)) return;
+  const g = desired.generations.find((x) => x.id === run.policy.lines.v07);
+  const cont = g && observed.managed.find((x) => x.labels[GENERATION_LABEL] === g.id && x.running);
+  if (!cont) return;
+  log(`${g.id}: restarting the conductor after the carrier wrote (it gives back the memory the calls kept)`);
+  try {
+    await docker.request('POST', `/containers/${cont.id}/restart?t=90`, { timeoutMs: 150000 });
+    c.last_restart_at = new Date().toISOString();
+    remember(state, { event: 'carrier_restart', generation: g.id });
+    persist();
+  } catch (e) {
+    log(`${g.id}: restart after the carrier failed (${e.message})`);
+  }
+}
+
 // ── old images (once a day, in the window; lib/prune.mjs) ──────────────────
 
 async function pruneImages(manifest) {
@@ -761,6 +851,7 @@ async function tick() {
     await upkeep(desired, after);
     await registrationWatch(desired, after);
     await memoryWatch(manifest, desired, after);
+    await carrierWatch(manifest, desired, after, results.length > 0);
     if (isWindow && !waiting.length && retiredPrevious) await pruneImages(manifest);
     if (Date.now() - lastReportAt >= cfg.reportMs) { await report(desired, after); lastReportAt = Date.now(); }
     current = { manifest, actions: results, waiting, lastTick: new Date().toISOString(), lastError: null };
@@ -787,6 +878,7 @@ function statusServer() {
       generations: state.generations, agent: state.agent,
       advisories: (current.manifest?.advisories || []).map((a) => ({ ...a, applied: state.advisories_applied.includes(a.id) })),
       waiting_for_window: current.waiting, last_tick: current.lastTick, last_error: current.lastError,
+      carrier: state.carrier ? { ...state.carrier, running: !!(carrierRun && !carrierRun.done) } : null,
       history: state.history.slice(0, 50),
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });

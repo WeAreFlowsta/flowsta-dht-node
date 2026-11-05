@@ -130,3 +130,13 @@ test('shape: a memory_restart block is checked; one without it is still accepted
   const bad = { ...base, memory_restart: { generations: ['holochain-0.7'], share: 0.05, slots: {} }, signature: { signer: 'x', sig: 'y' } };
   assert.match(validateShape(bad), /share must be between/);
 });
+
+test('shape: a carrier block is checked against the generations; one without it is still accepted', () => {
+  const base = sampleManifest();
+  const sig = { signer: 'x', sig: 'y' };
+  const lines = { v06: 'holochain-0.6', v07: 'holochain-0.7' };
+  assert.equal(validateShape({ ...base, carrier: { lines, every_hours: 6, dry_run: true }, signature: sig }), null);
+  assert.match(validateShape({ ...base, carrier: { lines: { v06: 'holochain-0.6', v07: 'holochain-0.9' }, every_hours: 6 }, signature: sig }), /unknown generation/);
+  assert.match(validateShape({ ...base, carrier: { lines, every_hours: 0 }, signature: sig }), /every_hours/);
+  assert.match(validateShape({ ...base, carrier: { lines, every_hours: 6, until: 'soon' }, signature: sig }), /until/);
+});
