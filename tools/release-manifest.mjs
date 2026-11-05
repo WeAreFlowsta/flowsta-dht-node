@@ -10,9 +10,10 @@
 // approval), checks the signature here, and uploads release-manifest.json to
 // the release. A beta also replaces the two files of the app's fixed beta
 // pre-release, which beta installs read. The macOS update files (the
-// .app.tar.gz the Mac updater downloads, and their .sig) move to the app's
-// update-files pre-release, so the page people download from shows the
-// installers only; the version file and the manifest name their new address.
+// .app.tar.gz the Mac updater downloads) and every updater signature (.sig;
+// latest.json carries each signature itself) move to the app's update-files
+// pre-release, so the page people download from shows the installers only;
+// the version file and the manifest name the new addresses.
 //
 // Usage:
 //   node tools/release-manifest.mjs <app> <tag> [--rollout 100] [--from <version>]
@@ -117,9 +118,10 @@ const sha256Of = async (asset) => {
   if (!r.ok) throw new Error(`download ${asset.name}: ${r.status}`);
   return createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex');
 };
-// The macOS update files leave the download page (Eric 2026-11-05: keep
-// building them, the Mac updater needs them; keep them off the page).
-const movesToUpdates = (name) => /\.app\.tar\.gz(\.sig)?$/.test(name);
+// The macOS update files and every .sig leave the download page (Eric
+// 2026-11-05: keep building them, the updater needs them; keep them off the
+// page).
+const movesToUpdates = (name) => /\.app\.tar\.gz$|\.sig$/.test(name);
 const updatesUrl = (name) => `https://github.com/${REPO}/releases/download/${UPDATES_TAG}/${encodeURIComponent(name)}`;
 const toMove = release.assets.filter((a) => movesToUpdates(a.name));
 // The update-files release as it is; this version's files there were moved
@@ -171,7 +173,7 @@ if (toMove.length && !dryRun) {
     updatesRelease = await (await gh(`/repos/${REPO}/releases`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tag_name: UPDATES_TAG, name: `Update files (for the ${NAME} updater)`, body: `Holds the macOS update files the ${NAME} updater downloads. The installers are on each release's own page.`, prerelease: true }),
+      body: JSON.stringify({ tag_name: UPDATES_TAG, name: `Update files (for the ${NAME} updater)`, body: `Holds the macOS update files the ${NAME} updater downloads, and every update file's signature. The installers are on each release's own page.`, prerelease: true }),
     })).json();
   }
   for (const a of toMove) {
@@ -321,7 +323,7 @@ if (channel === 'beta') {
 // names the copies. Then the update-files release keeps what either channel
 // still points at (unread channel: nothing is removed).
 for (const a of toMove) await gh(`/repos/${REPO}/releases/assets/${a.id}`, { method: 'DELETE' });
-if (toMove.length) console.log(`removed ${toMove.length} macOS update file(s) from ${tag}'s page`);
+if (toMove.length) console.log(`removed ${toMove.length} update file(s) from ${tag}'s page`);
 if (updatesRelease) {
   const otherUrl = channel === 'beta'
     ? `https://github.com/${REPO}/releases/latest/download/latest.json`
