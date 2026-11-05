@@ -42,27 +42,36 @@ async function download(url, dest, { allowedHost, maxBytes = MAX_BUNDLE_BYTES, t
   fs.writeFileSync(dest, Buffer.concat(chunks));
 }
 
+/**
+ * An app id with its separators folded, so an app installed under an older
+ * spelling of its id counts as installed (Singapore holds
+ * `flowsta-identity-v1.3` for the manifest's `flowsta_identity_v1_3`).
+ */
+export function appIdKey(id) {
+  return String(id).toLowerCase().replace(/[-._]/g, '_');
+}
+
 export async function reconcileDnas(admin, dnas, { happsDir = '/app/happs', downloadDir = '/tmp/flowsta-agent-dnas', log = console.log, allowedHost } = {}) {
   const apps = await admin.listApps({});
-  const byId = new Map(apps.map((a) => [a.installed_app_id, a]));
-  const result = { installed: [], enabled: [], failed: [] };
+  const byId = new Map(apps.map((a) => [appIdKey(a.installed_app_id), a]));
+  const result = { installed: [], enabled: [], failed: [], elsewhere: [] };
   // An app that is installed but not running (a first enable that was cut
   // short, a conductor restart mid-compile) is enabled again. The call can
   // take minutes on a small box while the wasm compiles; the admin client's
   // timeout is the caller's to set.
   for (const d of dnas) {
-    const app = byId.get(d.app_id);
+    const app = byId.get(appIdKey(d.app_id));
     if (app && !isRunning(app.status)) {
       try {
-        await admin.enableApp({ installed_app_id: d.app_id });
-        result.enabled.push(d.app_id);
-        log(`  enabled ${d.app_id}`);
+        await admin.enableApp({ installed_app_id: app.installed_app_id });
+        result.enabled.push(app.installed_app_id);
+        log(`  enabled ${app.installed_app_id}`);
       } catch (e) {
         result.failed.push({ app_id: d.app_id, reason: `enable: ${e.message || e}` });
       }
     }
   }
-  const missing = dnas.filter((d) => !byId.has(d.app_id));
+  const missing = dnas.filter((d) => !byId.has(appIdKey(d.app_id)));
   if (missing.length === 0) return result;
   const agentKey = apps.length > 0 ? apps[0].agent_pub_key : await admin.generateAgentPubKey();
   fs.mkdirSync(downloadDir, { recursive: true });
@@ -83,7 +92,9 @@ export async function reconcileDnas(admin, dnas, { happsDir = '/app/happs', down
       log(`  installed ${dna.app_id} (${(bytes.length / 1048576).toFixed(1)} MB)`);
     } catch (e) {
       const msg = e.message || String(e);
-      if (/AppAlreadyInstalled|CellAlreadyExists/.test(msg)) { await admin.enableApp({ installed_app_id: dna.app_id }).catch(() => {}); result.installed.push(dna.app_id); }
+      if (/AppAlreadyInstalled/.test(msg)) { await admin.enableApp({ installed_app_id: dna.app_id }).catch(() => {}); result.installed.push(dna.app_id); }
+      // Its cell runs under another app id: present, nothing installed.
+      else if (/CellAlreadyExists/.test(msg)) result.elsewhere.push(dna.app_id);
       else result.failed.push({ app_id: dna.app_id, reason: msg });
     }
   }

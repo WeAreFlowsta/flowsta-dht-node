@@ -64,7 +64,7 @@ export function inSlot(date, hhmm) {
 
 /**
  * Should this generation's conductor be restarted for its size?
- * @param {{ usedBytes: number, totalBytes: number }} mem  the conductor's memory (page cache excluded) and the VM's
+ * @param {{ usedBytes: number, totalBytes: number }} mem  the conductor's memory (page cache excluded, its swap included) and the VM's
  * @param {{ policy?: object, label: string, generation: string, now: Date, startedAt: number, lastRestartAt?: number | null }} o
  * @returns {{ restart: boolean, reason: string, share: number | null }}
  */

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
-import { parseMeminfo, containerMemory, readHost } from '../lib/host.mjs';
+import { parseMeminfo, containerMemory, readHost, parseSwapCurrent } from '../lib/host.mjs';
 
 const MEMINFO = `MemTotal:        4007028 kB
 MemFree:          120000 kB
@@ -40,4 +40,13 @@ test('readHost reads this machine and never throws', () => {
   assert.ok(h.disk_total === null || h.disk_used <= h.disk_total);
   const missing = readHost('/no/such/dir');
   assert.equal(missing.disk_total, null);
+});
+
+test('a container\'s swap from memory.swap.current; null when it is not one number', () => {
+  assert.equal(parseSwapCurrent('363855872\n'), 363855872);
+  assert.equal(parseSwapCurrent('0'), 0);
+  assert.equal(parseSwapCurrent(''), null);
+  assert.equal(parseSwapCurrent('cat: /sys/fs/cgroup/memory.swap.current: No such file or directory\r\n'), null);
+  assert.equal(parseSwapCurrent('max'), null);
+  assert.equal(parseSwapCurrent(undefined), null);
 });

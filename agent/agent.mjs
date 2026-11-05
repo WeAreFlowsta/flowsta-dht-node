@@ -67,7 +67,7 @@ import { verifyConductor, connectAdmin, isRunning } from './lib/verify.mjs';
 import { probeConductor } from '../updater/network-probe.mjs';
 import { putErrors, registrationVerdict } from './lib/registration.mjs';
 import { memoryVerdict } from './lib/memory.mjs';
-import { readHost, containerMemory } from './lib/host.mjs';
+import { readHost, containerMemory, parseSwapCurrent } from './lib/host.mjs';
 import { prunableImages } from './lib/prune.mjs';
 import { parseConductorEnv, configShaOf } from './lib/conductor-env.mjs';
 
@@ -521,6 +521,10 @@ async function upkeep(desired, observed) {
       if (r.installed.length) { remember(state, { event: 'dnas_installed', generation: gen.id, apps: r.installed }); persist(); }
       if (r.enabled.length) { remember(state, { event: 'dnas_enabled', generation: gen.id, apps: r.enabled }); persist(); }
       for (const f of r.failed) log(`${gen.id}: DNA ${f.app_id} not installed: ${f.reason}`);
+      for (const id of r.elsewhere) {
+        const seen = (state.generations[gen.id] ||= {}).elsewhere ||= [];
+        if (!seen.includes(id)) { seen.push(id); log(`${gen.id}: DNA ${id} already runs under another app id; left as it is`); persist(); }
+      }
     } catch (e) {
       log(`${gen.id}: upkeep skipped (${e.message})`);
     } finally {
@@ -607,8 +611,12 @@ async function memoryWatch(manifest, desired, observed) {
     const c = observed.managed.find((x) => x.labels[GENERATION_LABEL] === gen.id && x.running);
     if (!c) continue;
     try {
-      const [stats, info] = await Promise.all([docker.containerStats(c.id), docker.inspectContainer(c.id)]);
-      const usedBytes = containerMemory(stats);
+      const [stats, info, swapBytes] = await Promise.all([docker.containerStats(c.id), docker.inspectContainer(c.id), containerSwap(c.id)]);
+      // Swap counts: Docker's figure leaves it out, and a conductor the VM
+      // has pushed into swap holds that memory all the same (Europe 11-05:
+      // 43 % resident, 52 % with its swap).
+      const resident = containerMemory(stats);
+      const usedBytes = resident === null ? null : resident + (swapBytes || 0);
       const g = (state.generations[gen.id] ||= {});
       const v = memoryVerdict({ usedBytes, totalBytes }, {
         policy: manifest.memory_restart,
@@ -618,7 +626,7 @@ async function memoryWatch(manifest, desired, observed) {
         startedAt: Date.parse(info?.State?.StartedAt || '') || Date.now(),
         lastRestartAt: g.lastMemoryRestart ? Date.parse(g.lastMemoryRestart) : null,
       });
-      g.memory = { used_bytes: usedBytes, share: v.share === null ? null : Math.round(v.share * 1000) / 1000, verdict: v.reason, at: new Date().toISOString() };
+      g.memory = { used_bytes: usedBytes, swap_bytes: swapBytes, share: v.share === null ? null : Math.round(v.share * 1000) / 1000, verdict: v.reason, at: new Date().toISOString() };
       if (!v.restart) continue;
       if (cfg.dryRun) { log(`DRY RUN: would restart ${gen.id}: ${v.reason}`); continue; }
       log(`${gen.id}: restarting the conductor for its size: ${v.reason}`);
@@ -629,6 +637,16 @@ async function memoryWatch(manifest, desired, observed) {
     } catch (e) {
       log(`${gen.id}: memory check skipped (${e.message})`);
     }
+  }
+}
+
+/** A conductor container's swap (cgroup v2), read inside it; null when unreadable. */
+async function containerSwap(id) {
+  try {
+    const r = await docker.exec(id, ['cat', '/sys/fs/cgroup/memory.swap.current'], { timeoutMs: 15000 });
+    return r.exitCode === 0 ? parseSwapCurrent(r.output) : null;
+  } catch {
+    return null;
   }
 }
 
@@ -760,7 +778,7 @@ async function tick() {
 
 function statusServer() {
   if (!cfg.statusPort) return;
-  http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     if (req.url !== '/status.json' && req.url !== '/') { res.writeHead(404); return res.end(); }
     const body = {
       node: cfg.label, channel: cfg.channel, agent_version: cfg.version, signer: cfg.signerDid,
@@ -773,7 +791,21 @@ function statusServer() {
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(body, null, 2));
-  }).listen(cfg.statusPort, '127.0.0.1', () => log(`status on http://127.0.0.1:${cfg.statusPort}/status.json`));
+  });
+  // At a hand-over the agent being replaced can still hold the port for a
+  // moment (node1 11-04: EADDRINUSE, a crash, Docker's restart); try again
+  // for a minute, then run without the page.
+  let tries = 0;
+  server.on('listening', () => log(`status on http://127.0.0.1:${cfg.statusPort}/status.json`));
+  server.on('error', (e) => {
+    if (e.code === 'EADDRINUSE' && ++tries <= 30) {
+      if (tries === 1) log(`status port ${cfg.statusPort} still in use; trying again every 2 s`);
+      setTimeout(() => server.listen(cfg.statusPort, '127.0.0.1'), 2000);
+      return;
+    }
+    log(`status page off: ${e.message}`);
+  });
+  server.listen(cfg.statusPort, '127.0.0.1');
 }
 
 // ── main ─────────────────────────────────────────────────────────────────────
