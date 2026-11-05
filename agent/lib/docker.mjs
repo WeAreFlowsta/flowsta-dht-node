@@ -111,6 +111,17 @@ export class Docker {
   }
 
   /** One stats sample (memory, cpu) of a running container. */
+  /**
+   * Run a command in a running container and return its exit code and
+   * output (a TTY, so stdout and stderr together).
+   */
+  async exec(id, cmd, { timeoutMs = 30000 } = {}) {
+    const created = await this.request('POST', `/containers/${id}/exec`, { body: { AttachStdout: true, AttachStderr: true, Tty: true, Cmd: cmd } });
+    const { data } = await this.request('POST', `/exec/${created.Id}/start`, { body: { Detach: false, Tty: true }, raw: true, timeoutMs });
+    const info = await this.request('GET', `/exec/${created.Id}/json`);
+    return { exitCode: info?.ExitCode ?? null, output: data.toString('utf8') };
+  }
+
   containerStats(id) { return this.request('GET', `/containers/${id}/stats?stream=false&one-shot=true`, { timeoutMs: 30000 }); }
   listImages() { return this.request('GET', '/images/json'); }
   /** Never forced: Docker refuses an image a container still uses. */

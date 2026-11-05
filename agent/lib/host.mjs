@@ -33,6 +33,16 @@ export function containerMemory(stats) {
   return Math.max(0, m.usage - cache);
 }
 
+/**
+ * A container's swap in bytes from its cgroup v2 `memory.swap.current`,
+ * read inside it; null when the text is not one number (cgroup v1, no swap
+ * accounting, no `cat` in the image).
+ */
+export function parseSwapCurrent(text) {
+  const t = String(text ?? '').trim();
+  return /^\d+$/.test(t) ? Number(t) : null;
+}
+
 /** The host, as the report carries it. Every field may be null when unreadable. */
 export function readHost(stateDir) {
   let mem = { mem_total: null, mem_available: null, swap_total: null, swap_used: null };
