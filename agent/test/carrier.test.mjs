@@ -68,12 +68,18 @@ test('the report: the last JSON line of stdout; none when there is no such line'
 });
 
 test('the log line names what was carried, what waits and why a pass stopped', () => {
-  assert.equal(carrierSummary(REPORT, 0), 'carried 14 agent links, 10 polls, 36 votes; 1 waiting; 3 grant(s) added (exit 0)');
+  assert.equal(carrierSummary(REPORT, 0), 'carried 14 agent links, 10 polls, 36 votes; 1 waiting; 3 grants added (exit 0)');
   const dry = { ...REPORT, dry_run: true, wrote: false, grants: 0, waiting: 0, carried: { links: 0, polls: 2, later: 1, votes: 0, flags: 0, deleted: 1 } };
-  assert.equal(carrierSummary(dry, 0), 'would carry 2 polls, 1 later copies mapped, 1 copies removed (exit 0)');
+  assert.equal(carrierSummary(dry, 0), 'would carry 2 polls, 1 later copy mapped; would remove 1 copy (exit 0)');
   const stopped = { ...REPORT, carried: { links: 0, polls: 0, later: 0, votes: 0, flags: 0, deleted: 0 }, waiting: 0, grants: 0, failed: 2, stopped: 'free memory under 150 MB' };
   assert.equal(carrierSummary(stopped, 2), 'carried nothing; 2 failed; stopped: free memory under 150 MB (exit 2)');
   assert.equal(carrierSummary(null, 1), 'exit 1, no report');
+  // As the real binary reports them (the carrier leg through startPass, 11-06).
+  const one = { dry_run: false, wrote: true, carried: { links: 0, polls: 2, later: 0, votes: 4, flags: 1, deleted: 0 }, waiting: 0, failed: 0, grants: 0 };
+  assert.equal(carrierSummary(one, 0), 'carried 2 polls, 4 votes, 1 flag (exit 0)');
+  const removal = { ...one, carried: { links: 0, polls: 0, later: 0, votes: 0, flags: 0, deleted: 2 } };
+  assert.equal(carrierSummary(removal, 0), 'removed 2 copies (exit 0)');
+  assert.equal(carrierSummary({ ...one, dry_run: true, wrote: false, carried: {}, grants: 1 }, 0), 'would carry nothing; 1 grant added (exit 0)');
 });
 
 test('the restart: after a pass that wrote, unless the block turns it off; never after a dry run', () => {

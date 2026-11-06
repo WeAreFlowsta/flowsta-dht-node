@@ -121,23 +121,35 @@ export function parseCarrierReport(stdout) {
   return null;
 }
 
-/** The report's `carried` counts, as the log names them. */
-const LABELS = { links: 'agent links', polls: 'polls', later: 'later copies mapped', votes: 'votes', flags: 'flags', deleted: 'copies removed' };
+/** The report's `carried` counts, as the log names them: [one, more]. */
+const LABELS = {
+  links: ['agent link', 'agent links'],
+  polls: ['poll', 'polls'],
+  later: ['later copy mapped', 'later copies mapped'],
+  votes: ['vote', 'votes'],
+  flags: ['flag', 'flags'],
+};
+const counted = (n, [one, more]) => `${n} ${n === 1 ? one : more}`;
 
 /** One line for the log: what the pass did. */
 export function carrierSummary(report, code) {
   if (!report) return `exit ${code}, no report`;
   const c = report.carried || {};
-  const parts = Object.entries(c).filter(([, n]) => typeof n === 'number' && n > 0).map(([k, n]) => `${n} ${LABELS[k] || k.replace(/_/g, ' ')}`);
-  const what = parts.length ? parts.join(', ') : 'nothing';
-  const verb = report.dry_run ? 'would carry' : 'carried';
+  const parts = Object.entries(c)
+    .filter(([k, n]) => k !== 'deleted' && typeof n === 'number' && n > 0)
+    .map(([k, n]) => counted(n, LABELS[k] || [k.replace(/_/g, ' '), k.replace(/_/g, ' ')]));
+  const dry = report.dry_run === true;
+  const did = [];
+  if (parts.length) did.push(`${dry ? 'would carry' : 'carried'} ${parts.join(', ')}`);
+  if (c.deleted > 0) did.push(`${dry ? 'would remove' : 'removed'} ${counted(c.deleted, ['copy', 'copies'])}`);
+  if (!did.length) did.push(dry ? 'would carry nothing' : 'carried nothing');
   const extra = [
     report.waiting ? `${report.waiting} waiting` : null,
     report.failed ? `${report.failed} failed` : null,
-    report.grants ? `${report.grants} grant(s) added` : null,
+    report.grants ? `${counted(report.grants, ['grant', 'grants'])} added` : null,
     report.stopped ? `stopped: ${report.stopped}` : null,
   ].filter(Boolean);
-  return `${verb} ${what}${extra.length ? `; ${extra.join('; ')}` : ''} (exit ${code})`;
+  return `${did.join('; ')}${extra.length ? `; ${extra.join('; ')}` : ''} (exit ${code})`;
 }
 
 /** Restart the v07 conductor after this pass? Only after one that wrote. */
