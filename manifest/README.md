@@ -12,6 +12,12 @@ Rules the agent enforces (see `agent/lib/manifest.mjs`): images pinned by digest
 "memory_restart": { "generations": ["holochain-0.7"], "share": 0.45, "urgent_share": 0.6, "slots": { "europe-dht": "05:20", "singapore-dht": "05:50" } }
 ```
 
+**`carrier` (agent 2.0.12; optional; the `proofpoll` channel).** The agent runs the ProofPoll carrier (`proofpoll-carrier`, in an image built with `_CARRIER_URL` and `_CARRIER_SHA256`; `agent/lib/carrier.mjs`): one pass that carries ProofPoll's public records from DNA v1.3 (the `v06` generation's conductor) and v1.4 (`v07`) to v1.5 on `v07`, at most once in `every_hours`. A pass starts only when both conductors have run for 15 minutes, the VM has `min_free_mb` + 200 MB free, and nothing else changed the node in that tick (otherwise it tries again in 10 minutes); a pass running for 2 hours is stopped. After a pass that wrote, the agent restarts the `v07` conductor (`restart_after_write`, default true) to give back the memory the calls kept. `dry_run` counts only. The signing credentials are kept in `<STATE_DIR>/proofpoll-carrier.json` (owner-readable only), so the node's chains get one grant per cell, not one per pass. No pass after `until`. Older agents ignore the block. Example:
+
+```json
+"carrier": { "lines": { "v06": "holochain-0.6", "v07": "holochain-0.7" }, "every_hours": 6, "dry_run": true, "min_free_mb": 150 }
+```
+
 Image digests (2026-10-24, Cloud Build):
 
 | Image | Tag | Digest |
