@@ -139,7 +139,8 @@
     "urgent_share": 0.6,
     "slots": {
       "iowa-staging-node": "05:20",
-      "europe-staging": "05:50"
+      "europe-staging": "05:50",
+      "europe-staging-2": "05:50"
     }
   }
 }
