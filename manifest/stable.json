@@ -91,7 +91,7 @@
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:0d438c808ee417777b0b8417100f36b0e52d9c506893b8e465bb5b5657be446b"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:72c169ad50033704eb965a02789f6f0cf536cafa68b863c0b25ace4c2be4a96b"
   },
   "advisories": [
     {
@@ -117,6 +117,12 @@
       "severity": "routine",
       "action": "notice",
       "text": "Agent 2.0.11: a 0.7 conductor holding more than 45 % of the VM's memory is restarted cleanly in the node's slot, at most once a day; each report carries the host's memory, swap, disk and kernel and the conductor's own memory, restarts and refused registrations; old images of our repositories are removed once a day."
+    },
+    {
+      "id": "agent-2-0-12",
+      "severity": "routine",
+      "action": "notice",
+      "text": "Agent 2.0.12: a node whose manifest has a carrier block runs the ProofPoll carrier on a schedule (no other node runs it); a conductor's memory share counts its swap; an app installed under an older app id counts as installed; the status port waits for a hand-over to finish."
     }
   ],
   "memory_restart": {
