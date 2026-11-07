@@ -40,12 +40,17 @@
           "app_id": "proofpoll_v1_4",
           "sha256": "160f768b90a5e5ae27252af472ea95166782c0949f9df137ad3fd96507928dac",
           "url": "https://raw.githubusercontent.com/WeAreFlowsta/ProofPoll/169cc32/dna/v1.4/workdir/proofpoll_v1_4_happ.happ"
+        },
+        {
+          "app_id": "proofpoll_v1_5",
+          "sha256": "5966ce50b950439ce386849e1c6ad3a23d270cbd845997f296a261102b812751",
+          "url": "https://raw.githubusercontent.com/WeAreFlowsta/ProofPoll/proofpoll-v0.6.0-beta.3/dna/v1.5/workdir/proofpoll_v1_5_happ.happ"
         }
       ]
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:9cf38cfbfffd142fe061adfb508a5062f6c307acbc2ffb5f159bb4c389cb41e0"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:72c169ad50033704eb965a02789f6f0cf536cafa68b863c0b25ace4c2be4a96b"
   },
   "advisories": [
     {
@@ -65,6 +70,27 @@
       "severity": "routine",
       "action": "notice",
       "text": "Agent 2.0.10: the Holochain 0.7 conductor's config now caps each gossip exchange at 1 MiB, so two peers with a large difference still converge. The 0.7 conductor restarts once in your maintenance window to take it; nothing changes in what it stores."
+    },
+    {
+      "id": "agent-2-0-12",
+      "severity": "routine",
+      "action": "notice",
+      "text": "Agent 2.0.12: a node whose manifest has a carrier block runs the ProofPoll carrier on a schedule (no other node runs it); a conductor's memory share counts its swap; an app installed under an older app id counts as installed; the status port waits for a hand-over to finish."
+    },
+    {
+      "id": "2026-11-proofpoll-v1-5",
+      "severity": "routine",
+      "action": "notice",
+      "text": "ProofPoll v1.5 on the 0.7 generation (ProofPoll 0.6.0): what older installs write on v1.3 and v1.4 is carried to v1.5 with its proof by this node's carrier, once a day."
     }
-  ]
+  ],
+  "carrier": {
+    "lines": {
+      "v06": "holochain-0.6",
+      "v07": "holochain-0.7"
+    },
+    "every_hours": 24,
+    "dry_run": true,
+    "min_free_mb": 150
+  }
 }
