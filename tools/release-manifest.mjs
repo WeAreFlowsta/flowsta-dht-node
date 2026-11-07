@@ -18,7 +18,7 @@
 // Usage:
 //   node tools/release-manifest.mjs <app> <tag> [--rollout 100] [--from <version>]
 //        [--changes-line] [--sequence N] [--dry-run] [--no-upload] [--vault URL]
-//   <app>: vault or proofpoll (more as they adopt the updater).
+//   <app>: vault, proofpoll or yoai.
 //   --dry-run: print the manifest and its statement, sign nothing.
 //
 // The Vault signs for linked origins only: this tool uses the node manifest
@@ -54,6 +54,15 @@ const APPS = {
     tagPrefix: 'proofpoll-v',
     betaTag: 'proofpoll-beta',
     updatesTag: 'proofpoll-updates',
+    lines: ['holochain-0.6', 'holochain-0.7'],
+  },
+  yoai: {
+    name: 'Your Own AI',
+    app: 'com.solar.yourowai',
+    repo: 'WeAreFlowsta/Your-Own-AI',
+    tagPrefix: 'v',
+    betaTag: 'yoai-beta',
+    updatesTag: 'yoai-updates',
     lines: ['holochain-0.6', 'holochain-0.7'],
   },
 };
