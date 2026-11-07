@@ -84,6 +84,12 @@
       "text": "ProofPoll v1.5 on the 0.7 generation (ProofPoll 0.6.0): what older installs write on v1.3 and v1.4 is carried to v1.5 with its proof by this node's carrier, once a day."
     }
   ],
+  "memory_restart": {
+    "generations": ["holochain-0.7"],
+    "share": 0.2,
+    "urgent_share": 0.6,
+    "slots": { "proofpoll-node": "02:30" }
+  },
   "carrier": {
     "lines": {
       "v06": "holochain-0.6",
