@@ -96,7 +96,7 @@
       "v07": "holochain-0.7"
     },
     "every_hours": 24,
-    "dry_run": true,
+    "dry_run": false,
     "min_free_mb": 150
   }
 }
