@@ -7,13 +7,15 @@
 // (flowsta-release-manifest v1; checked in the apps by flowsta-update-check),
 // asks the running Flowsta Vault to sign it (POST /sign-release-manifest: the
 // Vault shows the app, version, channel and every file, and signs only on
-// approval), checks the signature here, and uploads release-manifest.json to
-// the release. A beta also replaces the two files of the app's fixed beta
-// pre-release, which beta installs read. The macOS update files (the
-// .app.tar.gz the Mac updater downloads) and every updater signature (.sig;
-// latest.json carries each signature itself) move to the app's update-files
-// pre-release, so the page people download from shows the installers only;
-// the version file and the manifest name the new addresses.
+// approval), checks the signature here, and publishes the channel's two
+// updater files (latest.json, release-manifest.json) to the app's fixed
+// channel pre-release (<app>-beta or <app>-stable), which installs read. The
+// macOS update files (the .app.tar.gz the Mac updater downloads), every
+// updater signature (.sig; latest.json carries each signature itself) and the
+// build's kit hashes move to the app's update-files pre-release, and the
+// version file leaves the release, so the page people download from shows
+// the installers and SHA256SUMS.txt only; the version file and the manifest
+// name the new addresses.
 //
 // Usage:
 //   node tools/release-manifest.mjs <app> <tag> [--rollout 100] [--from <version>]
@@ -44,6 +46,7 @@ const APPS = {
     repo: 'WeAreFlowsta/flowsta-vault-app',
     tagPrefix: 'vault-v',
     betaTag: 'vault-beta',
+    stableTag: 'vault-stable',
     updatesTag: 'vault-updates',
     lines: ['holochain-0.6', 'holochain-0.7'],
   },
@@ -53,6 +56,7 @@ const APPS = {
     repo: 'WeAreFlowsta/ProofPoll',
     tagPrefix: 'proofpoll-v',
     betaTag: 'proofpoll-beta',
+    stableTag: 'proofpoll-stable',
     updatesTag: 'proofpoll-updates',
     lines: ['holochain-0.6', 'holochain-0.7'],
   },
@@ -62,6 +66,7 @@ const APPS = {
     repo: 'WeAreFlowsta/Your-Own-AI',
     tagPrefix: 'v',
     betaTag: 'yoai-beta',
+    stableTag: 'yoai-stable',
     updatesTag: 'yoai-updates',
     lines: ['holochain-0.6', 'holochain-0.7'],
   },
@@ -83,7 +88,7 @@ if (!cfg || !tag || tag.startsWith('--')) {
   process.exit(2);
 }
 if (!tag.startsWith(cfg.tagPrefix)) throw new Error(`${appName} tags start with ${cfg.tagPrefix}`);
-const { name: NAME, app: APP, repo: REPO, betaTag: BETA_TAG, updatesTag: UPDATES_TAG, lines: LINES } = cfg;
+const { name: NAME, app: APP, repo: REPO, betaTag: BETA_TAG, stableTag: STABLE_TAG, updatesTag: UPDATES_TAG, lines: LINES } = cfg;
 const dryRun = flag('dry-run');
 const upload = !flag('no-upload') && !dryRun;
 const VAULT = opt('vault', 'http://localhost:27777').replace(/\/$/, '');
@@ -106,6 +111,10 @@ if (!release.id) throw new Error(`no release ${tag} in ${REPO}`);
 if (release.draft) throw new Error(`${tag} is still a draft: publish it first`);
 const version = tag.slice(cfg.tagPrefix.length);
 const channel = release.prerelease ? 'beta' : 'stable';
+// Each channel's two updater files live on one fixed pre-release (never the
+// "latest" release), so no release page carries them.
+const CHANNEL_TAG = channel === 'beta' ? BETA_TAG : STABLE_TAG;
+const channelUrl = (tagName, name) => `https://github.com/${REPO}/releases/download/${tagName}/${name}`;
 
 // The installers and updater files, by what their names say. An updater file's
 // .sig and the build's own records are not listed.
@@ -132,8 +141,14 @@ const sha256Of = async (asset) => {
 // 2026-11-05: keep building them, the updater needs them; keep them off the
 // page).
 const movesToUpdates = (name) => /\.app\.tar\.gz$|\.sig$/.test(name);
+// The build's sidecar hashes (read below into the manifest) are kept beside
+// the update files under this version's name; the version file the release
+// workflow wrote goes to the channel release.
+const KIT = /^kit-hashes-(.+)\.json$/;
+const keptKitName = (name) => name.replace(KIT, `kit-hashes-${version}-$1.json`);
 const updatesUrl = (name) => `https://github.com/${REPO}/releases/download/${UPDATES_TAG}/${encodeURIComponent(name)}`;
 const toMove = release.assets.filter((a) => movesToUpdates(a.name));
+const kitOnPage = release.assets.filter((a) => KIT.test(a.name));
 // The update-files release as it is; this version's files there were moved
 // by an earlier run.
 const updatesNow = await (await gh(`/repos/${REPO}/releases/tags/${UPDATES_TAG}`)).json();
@@ -152,8 +167,12 @@ if (files.length === 0) throw new Error(`${tag} has no installers or updater fil
 // at its published address, and each must download: links written while the
 // release was a draft point at an untagged-... address that stops working.
 const latestAsset = release.assets.find((a) => a.name === 'latest.json');
-if (!latestAsset) throw new Error(`${tag} has no latest.json (the release workflow writes it)`);
-const latestJson = JSON.parse(await (await fetch(latestAsset.browser_download_url)).text());
+const latestFrom = latestAsset ? latestAsset.browser_download_url : channelUrl(CHANNEL_TAG, 'latest.json');
+const latestRes = await fetch(latestFrom);
+if (!latestRes.ok) {
+  throw new Error(latestAsset ? `read ${latestFrom}: ${latestRes.status}` : `${tag} has no latest.json (the release workflow writes it) and ${CHANNEL_TAG} has none either (${latestRes.status})`);
+}
+const latestJson = JSON.parse(await latestRes.text());
 if (latestJson.version !== version) throw new Error(`${tag}'s latest.json is for ${latestJson.version}, not ${version}`);
 // A link to a file that moves now points at its copy (a second run finds it
 // moved already).
@@ -177,13 +196,13 @@ const download = async (url) => {
   return Buffer.from(await r.arrayBuffer());
 };
 let updatesRelease = null;
-if (toMove.length && !dryRun) {
+if ((toMove.length || kitOnPage.length) && !dryRun) {
   updatesRelease = updatesNow;
   if (!updatesRelease.id) {
     updatesRelease = await (await gh(`/repos/${REPO}/releases`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tag_name: UPDATES_TAG, name: `Update files (for the ${NAME} updater)`, body: `Holds the macOS update files the ${NAME} updater downloads, and every update file's signature. The installers are on each release's own page.`, prerelease: true }),
+      body: JSON.stringify({ tag_name: UPDATES_TAG, name: `Update files (for the ${NAME} updater)`, body: `Holds the macOS update files the ${NAME} updater downloads, every update file's signature, and each release's kit hashes. The installers are on each release's own page.`, prerelease: true }),
     })).json();
   }
   for (const a of toMove) {
@@ -212,7 +231,8 @@ for (const [key, p] of Object.entries(latestJson.platforms ?? {})) {
 }
 
 const kit = [];
-for (const asset of release.assets.filter((a) => /^kit-hashes-.+\.json$/.test(a.name))) {
+const kitKept = (updatesNow.assets || []).filter((a) => a.name.startsWith(`kit-hashes-${version}-`));
+for (const asset of kitOnPage.length ? kitOnPage : kitKept) {
   const r = await fetch(asset.browser_download_url);
   if (!r.ok) throw new Error(`download ${asset.name}: ${r.status}`);
   for (const k of await r.json()) kit.push({ line: k.line, target: k.target, sidecar: k.sidecar, sha256: k.sha256 });
@@ -222,9 +242,7 @@ kit.sort((a, b) => `${a.target} ${a.sidecar}`.localeCompare(`${b.target} ${b.sid
 // ---- The sequence: one above the last this channel published or this machine signed.
 const lastSignedPath = path.join(configDir, 'release-manifests', `${APP}-${channel}.json`);
 const lastSigned = fs.existsSync(lastSignedPath) ? JSON.parse(fs.readFileSync(lastSignedPath, 'utf8')).sequence : 0;
-const channelManifestUrl = channel === 'beta'
-  ? `https://github.com/${REPO}/releases/download/${BETA_TAG}/release-manifest.json`
-  : `https://github.com/${REPO}/releases/latest/download/release-manifest.json`;
+const channelManifestUrl = channelUrl(CHANNEL_TAG, 'release-manifest.json');
 const published = await fetch(channelManifestUrl).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 let sequence = Number(opt('sequence', 0));
 if (!sequence) {
@@ -306,47 +324,56 @@ fs.writeFileSync(lastSignedPath, body);
 console.log(`verified as Team Flowsta; written ${lastSignedPath}`);
 if (!upload) process.exit(0);
 
-// ---- Upload: the release itself (stable installs read the latest release's file), and for a beta the app's beta pre-release too.
+// ---- Upload: the channel's fixed pre-release, which installs read.
 const replaceAsset = async (rel, name, data, type) => {
   for (const a of rel.assets.filter((x) => x.name === name)) await gh(`/repos/${REPO}/releases/assets/${a.id}`, { method: 'DELETE' });
   await gh(`https://uploads.github.com/repos/${REPO}/releases/${rel.id}/assets?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': type }, body: data });
 };
-await replaceAsset(release, 'release-manifest.json', body, 'application/json');
-// Stable installs read the newest release's own version file.
-await replaceAsset(release, 'latest.json', latestBody, 'application/json');
-console.log(`uploaded release-manifest.json and latest.json to ${tag}`);
-if (channel === 'beta') {
-  let beta = await (await gh(`/repos/${REPO}/releases/tags/${BETA_TAG}`)).json();
-  if (!beta.id) {
-    beta = await (await gh(`/repos/${REPO}/releases`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tag_name: BETA_TAG, name: `Beta channel (for the ${NAME} updater)`, body: 'Holds the beta channel\'s two updater files. The installers are on each beta\'s own release.', prerelease: true }),
-    })).json();
-  }
-  await replaceAsset(beta, 'latest.json', latestBody, 'application/json');
-  await replaceAsset(beta, 'release-manifest.json', body, 'application/json');
-  console.log(`beta channel (${BETA_TAG}) now points at ${version}`);
+let channelRelease = await (await gh(`/repos/${REPO}/releases/tags/${CHANNEL_TAG}`)).json();
+if (!channelRelease.id) {
+  const label = channel === 'beta' ? 'Beta' : 'Stable';
+  channelRelease = await (await gh(`/repos/${REPO}/releases`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag_name: CHANNEL_TAG, name: `${label} channel (for the ${NAME} updater)`, body: `Holds the ${channel} channel's two updater files. The installers are on each release's own page.`, prerelease: true }),
+  })).json();
+}
+await replaceAsset(channelRelease, 'latest.json', latestBody, 'application/json');
+await replaceAsset(channelRelease, 'release-manifest.json', body, 'application/json');
+console.log(`${channel} channel (${CHANNEL_TAG}) now points at ${version}`);
+
+// The build's kit hashes, kept beside the update files under this version's name.
+if (kitOnPage.length) {
+  const current = await (await gh(`/repos/${REPO}/releases/${updatesRelease.id}`)).json();
+  for (const a of kitOnPage) await replaceAsset(current, keptKitName(a.name), await download(a.browser_download_url), 'application/json');
+  console.log(`kept ${kitOnPage.length} kit hash file(s) in ${UPDATES_TAG}`);
 }
 
 // ---- The originals leave the download page, now that every version file
 // names the copies. Then the update-files release keeps what either channel
 // still points at (unread channel: nothing is removed).
-for (const a of toMove) await gh(`/repos/${REPO}/releases/assets/${a.id}`, { method: 'DELETE' });
-if (toMove.length) console.log(`removed ${toMove.length} update file(s) from ${tag}'s page`);
+const offPage = [...toMove, ...kitOnPage, ...release.assets.filter((a) => a.name === 'latest.json' || a.name === 'release-manifest.json')];
+for (const a of offPage) await gh(`/repos/${REPO}/releases/assets/${a.id}`, { method: 'DELETE' });
+if (offPage.length) console.log(`removed ${offPage.length} updater file(s) from ${tag}'s page`);
 if (updatesRelease) {
-  const otherUrl = channel === 'beta'
-    ? `https://github.com/${REPO}/releases/latest/download/latest.json`
-    : `https://github.com/${REPO}/releases/download/${BETA_TAG}/latest.json`;
-  const other = await fetch(otherUrl).then((r) => (r.status === 404 ? { platforms: {} } : r.ok ? r.json() : null)).catch(() => null);
-  if (other) {
+  // The other channel's version file, at its channel release; a stable
+  // published before channel releases existed is read where it was.
+  const read = (url) => fetch(url).then((r) => (r.status === 404 ? { platforms: {} } : r.ok ? r.json() : null)).catch(() => null);
+  const otherTag = channel === 'beta' ? STABLE_TAG : BETA_TAG;
+  const others = [await read(channelUrl(otherTag, 'latest.json'))];
+  if (channel === 'beta') others.push(await read(`https://github.com/${REPO}/releases/latest/download/latest.json`));
+  if (others.every(Boolean)) {
     const keep = new Set();
-    for (const p of [...Object.values(latestJson.platforms ?? {}), ...Object.values(other.platforms ?? {})]) {
-      const name = decodeURIComponent(String(p.url).split('/').pop());
-      keep.add(name).add(`${name}.sig`);
+    for (const v of [latestJson, ...others]) {
+      if (v.version) keep.add(`kit-hashes-${v.version}-`);
+      for (const p of Object.values(v.platforms ?? {})) {
+        const name = decodeURIComponent(String(p.url).split('/').pop());
+        keep.add(name).add(`${name}.sig`);
+      }
     }
+    const kept = (name) => keep.has(name) || [...keep].some((k) => k.endsWith('-') && name.startsWith(k));
     const current = await (await gh(`/repos/${REPO}/releases/${updatesRelease.id}`)).json();
-    for (const a of current.assets.filter((x) => !keep.has(x.name))) {
+    for (const a of current.assets.filter((x) => !kept(x.name))) {
       await gh(`/repos/${REPO}/releases/assets/${a.id}`, { method: 'DELETE' });
       console.log(`removed ${a.name} from ${UPDATES_TAG} (no channel points at it)`);
     }
