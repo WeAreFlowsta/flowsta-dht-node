@@ -87,6 +87,21 @@ test('advisories: security ones outside the window only when allowed; notices ne
   assert.deepEqual(actionableAdvisories(manifest, { applied, inWindow: true, securityAnytime: false }).map((a) => a.id), ['sec', 'rout']);
 });
 
+test('conductor config: the gossip cap goes only for a conductor build that needs none', () => {
+  const gen = (build, holochain = '0.7.1') => ({ id: 'g', holochain, conductor: { admin_port: 4445, ...(build === undefined ? {} : { build }) }, bootstrap: { url: 'https://bootstrap-7.flowsta.com' } });
+  const render = (g) => renderConductorConfig(g, { authBootstrap: 'AAA' });
+  assert.match(render(gen()), /maxGossipOpBytes: 1048576/);
+  assert.match(render(gen('flowsta.3')), /maxGossipOpBytes: 1048576/);
+  assert.match(render(gen('nonsense')), /maxGossipOpBytes: 1048576/);
+  for (const build of ['flowsta.4', 'flowsta.12']) {
+    const c = render(gen(build));
+    assert.doesNotMatch(c, /advanced|k2Gossip|maxGossipOpBytes/);
+    assert.match(c, /request_timeout_s: 60\n  base64_auth_material_bootstrap/);
+    assert.match(c, new RegExp(`build ${build.replace('.', '\\.')}\\)`));
+  }
+  assert.doesNotMatch(render(gen('flowsta.4', '0.6.1')), /maxGossipOpBytes/);
+});
+
 test('conductor config: 0.6 keeps signal_url, 0.7 has none and carries request_timeout_s + db_sync_level', () => {
   const gen6 = { id: 'holochain-0.6', holochain: '0.6.1', conductor: { admin_port: 4444 }, bootstrap: { url: 'https://bootstrap.flowsta.com' } };
   const gen7 = { id: 'holochain-0.7', holochain: '0.7.1', conductor: { admin_port: 4445 }, bootstrap: { url: 'https://bootstrap-7.flowsta.com' } };

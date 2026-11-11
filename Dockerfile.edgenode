@@ -10,6 +10,8 @@
 # Two lines are built from this file during the 0.6 -> 0.7 transition:
 #   HOLOCHAIN_VERSION=0.6.1  -> flowsta-edgenode:hc0.6.1 (the digest the fleet runs today)
 #   HOLOCHAIN_VERSION=0.7.1  -> flowsta-edgenode:hc0.7.1
+#   HOLOCHAIN_VERSION=0.7.1 HOLOCHAIN_BUILD=flowsta.4 -> flowsta-edgenode:hc0.7.1-flowsta.4
+#     (the conductor from WeAreFlowsta/holochain-build; see below)
 #
 # Build:  gcloud builds submit --config=cloudbuild-edgenode.yaml \
 #           --substitutions=_HOLOCHAIN_VERSION=0.7.1 --project=flowsta-475001
@@ -37,6 +39,22 @@ RUN wget -q "https://github.com/holochain/holochain/releases/download/holochain-
  && chmod +x /bin/holochain /bin/hc \
  && /bin/holochain --version
 
+# Optionally, the conductor as built by WeAreFlowsta/holochain-build: the same
+# upstream release with the patches listed in that repository (nothing another
+# conductor can see changes; a database opens with either binary). The build
+# is named (`flowsta.4`) and its SHA-256 must be given; a download that does
+# not match fails the build. `hc` stays upstream's.
+#   HOLOCHAIN_BUILD=flowsta.4 -> flowsta-edgenode:hc0.7.1-flowsta.4
+ARG HOLOCHAIN_BUILD=
+ARG HOLOCHAIN_BUILD_SHA256=
+RUN if [ -n "${HOLOCHAIN_BUILD}" ]; then \
+      [ -n "${HOLOCHAIN_BUILD_SHA256}" ] || { echo "HOLOCHAIN_BUILD needs HOLOCHAIN_BUILD_SHA256"; exit 1; }; \
+      wget -q "https://github.com/WeAreFlowsta/holochain-build/releases/download/holochain-${HOLOCHAIN_VERSION}-${HOLOCHAIN_BUILD}/holochain-${HC_ARCH}" -O /tmp/holochain \
+      && echo "${HOLOCHAIN_BUILD_SHA256}  /tmp/holochain" | sha256sum -c - \
+      && mv /tmp/holochain /bin/holochain && chmod +x /bin/holochain \
+      && /bin/holochain --version; \
+    fi
+
 # The upstream entrypoint insists on admin port 4444. Two conductors share a
 # host during a Holochain line transition, so each runs on its own admin
 # port; the check becomes "an admin port is configured". The template is
@@ -52,4 +70,5 @@ RUN for f in /etc/s6-overlay/s6-rc.d/setup/init.sh /usr/local/bin/entrypoint.sh 
  && ! grep -rq 'port: 4444' /etc/s6-overlay/s6-rc.d/setup/init.sh
 
 LABEL org.flowsta.base="ghcr.io/holo-host/edgenode@sha256:bd6336f1a2a4ce47b819123e1ef84353cfc7357df5e1832ea59aba8ab77904d3" \
-      org.flowsta.holochain-version="${HOLOCHAIN_VERSION}"
+      org.flowsta.holochain-version="${HOLOCHAIN_VERSION}" \
+      org.flowsta.holochain-build="${HOLOCHAIN_BUILD}"

@@ -73,6 +73,7 @@ export function validateShape(m) {
     if (typeof g.conductor.image !== 'string' || !DIGEST_IMAGE.test(g.conductor.image)) return `conductor image on ${g.id} must be pinned by digest`;
     if (!Number.isInteger(g.conductor.admin_port) || g.conductor.admin_port < 1024 || g.conductor.admin_port > 65535 || ports.has(g.conductor.admin_port)) return `bad admin_port on ${g.id}`;
     ports.add(g.conductor.admin_port);
+    if (g.conductor.build !== undefined && (typeof g.conductor.build !== 'string' || !/^flowsta\.\d{1,4}$/.test(g.conductor.build))) return `bad conductor build on ${g.id}`;
     if (!g.bootstrap || typeof g.bootstrap.url !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(g.bootstrap.url)) return `bad bootstrap url on ${g.id}`;
     if (g.bootstrap.server_image !== undefined && !DIGEST_IMAGE.test(g.bootstrap.server_image)) return `bootstrap server image on ${g.id} must be pinned by digest`;
     if (g.adopts_legacy_conductor !== undefined && typeof g.adopts_legacy_conductor !== 'boolean') return `bad adopts_legacy_conductor on ${g.id}`;
