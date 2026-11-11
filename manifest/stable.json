@@ -91,7 +91,7 @@
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:72c169ad50033704eb965a02789f6f0cf536cafa68b863c0b25ace4c2be4a96b"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:1ec09ee1eb2766d12f664c1923ca4264133a421636f748c96f13d3b6ecd23129"
   },
   "advisories": [
     {
@@ -123,6 +123,12 @@
       "severity": "routine",
       "action": "notice",
       "text": "Agent 2.0.12: a node whose manifest has a carrier block runs the ProofPoll carrier on a schedule (no other node runs it); a conductor's memory share counts its swap; an app installed under an older app id counts as installed; the status port waits for a hand-over to finish."
+    },
+    {
+      "id": "agent-2-0-13",
+      "severity": "routine",
+      "action": "notice",
+      "text": "Agent 2.0.13: a manifest may name the build of a generation's conductor. Nothing else changes on a node with this update; no conductor restarts."
     }
   ],
   "memory_restart": {
