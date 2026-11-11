@@ -59,7 +59,8 @@
       "state": "serving",
       "holochain": "0.7.1",
       "conductor": {
-        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f",
+        "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-edgenode@sha256:1f0604bc2e26a6dd6f842c46334c0b9ebd26172a4e3b31dee6caeb6d49e4ad5b",
+        "build": "flowsta.4",
         "admin_port": 4445
       },
       "bootstrap": {
@@ -91,7 +92,7 @@
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:72c169ad50033704eb965a02789f6f0cf536cafa68b863c0b25ace4c2be4a96b"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:1ec09ee1eb2766d12f664c1923ca4264133a421636f748c96f13d3b6ecd23129"
   },
   "advisories": [
     {
@@ -129,6 +130,13 @@
       "severity": "routine",
       "action": "notice",
       "text": "Agent 2.0.12: a node whose manifest has a carrier block runs the ProofPoll carrier on a schedule (no other node runs it); a conductor's memory share counts its swap; an app installed under an older app id counts as installed; the status port waits for a hand-over to finish."
+    },
+    {
+      "id": "agent-2-0-13-conductor-flowsta-4",
+      "severity": "routine",
+      "action": "notice",
+      "generation": "holochain-0.7",
+      "text": "Agent 2.0.13 and a new 0.7 conductor image: Holochain 0.7.1 as built by WeAreFlowsta/holochain-build (flowsta.4, six patches; nothing another conductor can see changes). It answers a gossip offer of any size, so its config no longer caps an exchange at 1 MiB and long histories reach other conductors. The conductor restarts once in the node's window."
     }
   ],
   "memory_restart": {
