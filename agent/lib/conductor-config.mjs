@@ -11,10 +11,28 @@
  *      10,900 op ids ("too many SQL variables"), so two peers with a large
  *      difference never converge. Capping the bytes per exchange keeps every
  *      exchange under that; each conductor's own value bounds what it receives.
+ *      The cap has a cost: history older than about 30 minutes reaches
+ *      another conductor only through the comparison of DHT sectors, which
+ *      skips any batch larger than the cap. A conductor built by
+ *      WeAreFlowsta/holochain-build from `flowsta.4` on answers an offer of
+ *      any size, so it runs without the cap. The manifest names the build
+ *      (`conductor.build`) beside the image, so the two change together and
+ *      a rollback to the old container brings its capped config back.
  */
 
 /** The 0.7 gossip cap, in bytes (the same value the apps use). */
 export const GOSSIP_OP_BYTES_07 = 1048576;
+
+/** The first holochain-build release whose conductor needs no gossip cap. */
+export const FIRST_BUILD_WITHOUT_CAP = 4;
+export const BUILD_NAME = /^flowsta\.(\d{1,4})$/;
+
+/** Whether a generation's conductor must run with the gossip cap. */
+export function needsGossipCap(generation) {
+  if (holochainLine(generation.holochain) === '0.6') return false;
+  const m = BUILD_NAME.exec(generation.conductor?.build || '');
+  return !(m && Number(m[1]) >= FIRST_BUILD_WITHOUT_CAP);
+}
 export function holochainLine(version) {
   const m = /^(\d+)\.(\d+)/.exec(version);
   if (!m) throw new Error(`bad holochain version "${version}"`);
@@ -37,7 +55,7 @@ export function renderConductorConfig(generation, { authBootstrap, authRelay, tr
   const yamlStr = (s) => JSON.stringify(String(s));
   const lines = [
     '# Rendered by the Flowsta node agent from the signed manifest. Edits here are overwritten.',
-    `# generation: ${generation.id} (Holochain ${generation.holochain})`,
+    `# generation: ${generation.id} (Holochain ${generation.holochain}${generation.conductor.build ? `, build ${generation.conductor.build}` : ''})`,
     'admin_interfaces:',
     '- driver:',
     '    type: websocket',
@@ -56,7 +74,7 @@ export function renderConductorConfig(generation, { authBootstrap, authRelay, tr
   } else {
     lines.push(`  relay_url: ${yamlStr(`https://${host}./`)}`);
     lines.push('  request_timeout_s: 60');
-    lines.push('  advanced:', '    k2Gossip:', `      maxGossipOpBytes: ${GOSSIP_OP_BYTES_07}`, `      maxRequestGossipOpBytes: ${GOSSIP_OP_BYTES_07}`);
+    if (needsGossipCap(generation)) lines.push('  advanced:', '    k2Gossip:', `      maxGossipOpBytes: ${GOSSIP_OP_BYTES_07}`, `      maxRequestGossipOpBytes: ${GOSSIP_OP_BYTES_07}`);
   }
   if (authBootstrap) lines.push(`  base64_auth_material_bootstrap: ${yamlStr(authBootstrap)}`);
   if (authRelay) lines.push(`  base64_auth_material_relay: ${yamlStr(authRelay)}`);

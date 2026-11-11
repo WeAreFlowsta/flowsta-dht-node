@@ -99,6 +99,9 @@ test('shape: images must be digest-pinned, ports unique, states known', () => {
   assert.match(validateShape({ ...samePort, signature: { signer: 'x', sig: 'y' } }), /admin_port/);
   const badState = structuredClone(base); badState.generations[1].state = 'paused';
   assert.match(validateShape({ ...badState, signature: { signer: 'x', sig: 'y' } }), /bad state/);
+  const withBuild = (build) => { const m = sampleManifest(); m.generations[1].conductor.build = build; return { ...m, signature: { signer: 'x', sig: 'y' } }; };
+  assert.equal(validateShape(withBuild('flowsta.4')), null);
+  for (const bad of ['flowsta', 'flowsta.4; rm', 4, '']) assert.match(validateShape(withBuild(bad)), /bad conductor build/);
   const badAdvisory = structuredClone(base); badAdvisory.advisories = [{ id: 'x', severity: 'urgent', action: 'update', text: '' }];
   assert.match(validateShape({ ...badAdvisory, signature: { signer: 'x', sig: 'y' } }), /severity/);
 });

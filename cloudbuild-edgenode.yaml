@@ -8,9 +8,16 @@
 # Usage:
 #   gcloud builds submit --config=cloudbuild-edgenode.yaml \
 #     --substitutions=_HOLOCHAIN_VERSION=0.7.1 --project=flowsta-475001
+#
+# With the conductor from WeAreFlowsta/holochain-build (its SHA-256 is in that
+# release's SHA256SUMS.txt):
+#   --substitutions=_HOLOCHAIN_VERSION=0.7.1,_HOLOCHAIN_BUILD=flowsta.4,_HOLOCHAIN_BUILD_SHA256=<sha256>,_TAG=hc0.7.1-flowsta.4
 
 substitutions:
   _HOLOCHAIN_VERSION: '0.6.1'
+  _HOLOCHAIN_BUILD: ''
+  _HOLOCHAIN_BUILD_SHA256: ''
+  _TAG: 'hc${_HOLOCHAIN_VERSION}'
   _REPO: 'us-docker.pkg.dev/flowsta-475001/public'
 
 steps:
@@ -21,11 +28,18 @@ steps:
       - 'Dockerfile.edgenode'
       - '--build-arg'
       - 'HOLOCHAIN_VERSION=${_HOLOCHAIN_VERSION}'
+      - '--build-arg'
+      - 'HOLOCHAIN_BUILD=${_HOLOCHAIN_BUILD}'
+      - '--build-arg'
+      - 'HOLOCHAIN_BUILD_SHA256=${_HOLOCHAIN_BUILD_SHA256}'
       - '-t'
-      - '${_REPO}/flowsta-edgenode:hc${_HOLOCHAIN_VERSION}'
+      - '${_REPO}/flowsta-edgenode:${_TAG}'
       - '.'
 
 images:
-  - '${_REPO}/flowsta-edgenode:hc${_HOLOCHAIN_VERSION}'
+  - '${_REPO}/flowsta-edgenode:${_TAG}'
 
 timeout: '600s'
+
+options:
+  dynamicSubstitutions: true

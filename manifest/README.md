@@ -6,6 +6,8 @@ Rules the agent enforces (see `agent/lib/manifest.mjs`): images pinned by digest
 
 `generation-holochain-0.7.json` is the 0.7.1 generation entry, to be added to a channel's `generations` once that channel has a bootstrap host running the kitsune2 0.5.x server (the 0.6 and 0.7 lines need different bootstrap servers; the bootstrap role in `docker-compose.yml` runs both behind an SNI proxy).
 
+**`conductor.build` (agent 2.0.13; optional; a generation's conductor).** Names the [holochain-build](https://github.com/WeAreFlowsta/holochain-build) release the image's conductor comes from, for example `"build": "flowsta.4"`; leave it out for an image with upstream's binary. A 0.7 conductor from `flowsta.4` or later answers a gossip offer of any size, so the agent writes its config without the 1 MiB gossip cap; every other 0.7 conductor keeps the cap. Set it only together with an image built with `_HOLOCHAIN_BUILD` (`cloudbuild-edgenode.yaml`): an upstream binary without the cap drops large gossip exchanges. Older agents ignore the field and keep the cap, which is safe with either binary.
+
 **`memory_restart` (agent 2.0.11; optional).** When a conductor of a named generation holds more than `share` of the VM's memory (page cache excluded), the agent restarts it cleanly in that node's slot (`slots`: node label → `HH:MM`, node-local like `UPDATE_WINDOW`; 20 minutes long), at most once in `every_hours` (default 24, at least 6) and never within 6 hours of a start. A node without a slot never restarts for memory, except above `urgent_share` when that is set. Older agents ignore the block. Example:
 
 ```json
