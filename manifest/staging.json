@@ -143,8 +143,9 @@
     "generations": [
       "holochain-0.7"
     ],
-    "share": 0.45,
-    "urgent_share": 0.6,
+    "share": 0.4,
+    "urgent_share": 0.5,
+    "every_hours": 6,
     "slots": {
       "iowa-staging-node": "05:20",
       "europe-staging-2": "05:50"
