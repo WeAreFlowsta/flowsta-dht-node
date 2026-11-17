@@ -146,9 +146,15 @@ const movesToUpdates = (name) => /\.app\.tar\.gz$|\.sig$/.test(name);
 // workflow wrote goes to the channel release.
 const KIT = /^kit-hashes-(.+)\.json$/;
 const keptKitName = (name) => name.replace(KIT, `kit-hashes-${version}-$1.json`);
+// The parts the release needs beside the app (an optional engine, a helper
+// program), written by the app's build as parts.json: read below into the
+// manifest and kept beside the update files under this version's name.
+const PARTS_FILE = 'parts.json';
+const keptPartsName = `parts-${version}.json`;
 const updatesUrl = (name) => `https://github.com/${REPO}/releases/download/${UPDATES_TAG}/${encodeURIComponent(name)}`;
 const toMove = release.assets.filter((a) => movesToUpdates(a.name));
 const kitOnPage = release.assets.filter((a) => KIT.test(a.name));
+const partsOnPage = release.assets.filter((a) => a.name === PARTS_FILE);
 // The update-files release as it is; this version's files there were moved
 // by an earlier run.
 const updatesNow = await (await gh(`/repos/${REPO}/releases/tags/${UPDATES_TAG}`)).json();
@@ -196,7 +202,7 @@ const download = async (url) => {
   return Buffer.from(await r.arrayBuffer());
 };
 let updatesRelease = null;
-if ((toMove.length || kitOnPage.length) && !dryRun) {
+if ((toMove.length || kitOnPage.length || partsOnPage.length) && !dryRun) {
   updatesRelease = updatesNow;
   if (!updatesRelease.id) {
     updatesRelease = await (await gh(`/repos/${REPO}/releases`, {
@@ -239,6 +245,26 @@ for (const asset of kitOnPage.length ? kitOnPage : kitKept) {
 }
 kit.sort((a, b) => `${a.target} ${a.sidecar}`.localeCompare(`${b.target} ${b.sidecar}`));
 
+// The parts: a name, a target, a version, and the file's size and hash. No
+// address: the app that knows a part knows where its files are published.
+const parts = [];
+const partsKept = (updatesNow.assets || []).filter((a) => a.name === keptPartsName);
+const plainWord = (v) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(v) && !v.includes('..');
+for (const asset of partsOnPage.length ? partsOnPage : partsKept) {
+  const r = await fetch(asset.browser_download_url);
+  if (!r.ok) throw new Error(`download ${asset.name}: ${r.status}`);
+  const listed = await r.json();
+  if (!Array.isArray(listed)) throw new Error(`${asset.name} is not a list`);
+  for (const [i, p] of listed.entries()) {
+    if (!plainWord(p.name) || !plainWord(p.target) || !plainWord(p.version) || !Number.isInteger(p.size) || p.size < 1 || !/^[0-9a-f]{64}$/.test(p.sha256 ?? '')) {
+      throw new Error(`${asset.name}[${i}] needs a name, a target and a version in plain words, a size and a sha256`);
+    }
+    parts.push({ name: p.name, target: p.target, version: p.version, size: p.size, sha256: p.sha256 });
+  }
+}
+parts.sort((a, b) => `${a.name} ${a.target}`.localeCompare(`${b.name} ${b.target}`));
+if (new Set(parts.map((p) => `${p.name} ${p.target}`)).size !== parts.length) throw new Error('parts.json names the same part twice for one target');
+
 // ---- The sequence: one above the last this channel published or this machine signed.
 const lastSignedPath = path.join(configDir, 'release-manifests', `${APP}-${channel}.json`);
 const lastSigned = fs.existsSync(lastSignedPath) ? JSON.parse(fs.readFileSync(lastSignedPath, 'utf8')).sequence : 0;
@@ -267,6 +293,9 @@ const manifest = {
   kit,
 };
 if (opt('from')) manifest.from_version = opt('from');
+// Only a release that names parts carries the member: every other manifest
+// is the same bytes as before the member existed.
+if (parts.length) manifest.parts = parts;
 
 // ---- The statement: the node manifests' canonical JSON (sorted keys, no
 // whitespace), the same bytes as the Vault and flowsta-update-check. Integers only.
@@ -278,6 +307,7 @@ const statement = `flowsta-release-manifest:v1:${APP}:${channel}:${sequence}:${c
 console.log(`${APP} ${version} on ${channel}, sequence ${sequence}, rollout ${percent} %`);
 for (const f of files) console.log(`  ${f.platform.padEnd(15)} ${f.kind.padEnd(12)} ${String(f.size).padStart(10)}  ${f.sha256}  ${f.name}`);
 for (const k of kit) console.log(`  kit ${k.target.padEnd(28)} ${k.sidecar.padEnd(24)} ${k.sha256}`);
+for (const p of parts) console.log(`  part ${p.name.padEnd(16)} ${p.target.padEnd(28)} ${p.version.padEnd(10)} ${String(p.size).padStart(10)}  ${p.sha256}`);
 console.log(`statement ${statement}`);
 if (dryRun) {
   console.log('\n--dry-run: nothing signed or uploaded');
@@ -349,10 +379,17 @@ if (kitOnPage.length) {
   console.log(`kept ${kitOnPage.length} kit hash file(s) in ${UPDATES_TAG}`);
 }
 
+// ...and its list of parts.
+if (partsOnPage.length) {
+  const current = await (await gh(`/repos/${REPO}/releases/${updatesRelease.id}`)).json();
+  await replaceAsset(current, keptPartsName, await download(partsOnPage[0].browser_download_url), 'application/json');
+  console.log(`kept the parts list in ${UPDATES_TAG}`);
+}
+
 // ---- The originals leave the download page, now that every version file
 // names the copies. Then the update-files release keeps what either channel
 // still points at (unread channel: nothing is removed).
-const offPage = [...toMove, ...kitOnPage, ...release.assets.filter((a) => a.name === 'latest.json' || a.name === 'release-manifest.json')];
+const offPage = [...toMove, ...kitOnPage, ...partsOnPage, ...release.assets.filter((a) => a.name === 'latest.json' || a.name === 'release-manifest.json')];
 for (const a of offPage) await gh(`/repos/${REPO}/releases/assets/${a.id}`, { method: 'DELETE' });
 if (offPage.length) console.log(`removed ${offPage.length} updater file(s) from ${tag}'s page`);
 if (updatesRelease) {
@@ -366,6 +403,7 @@ if (updatesRelease) {
     const keep = new Set();
     for (const v of [latestJson, ...others]) {
       if (v.version) keep.add(`kit-hashes-${v.version}-`);
+      if (v.version) keep.add(`parts-${v.version}.json`);
       for (const p of Object.values(v.platforms ?? {})) {
         const name = decodeURIComponent(String(p.url).split('/').pop());
         keep.add(name).add(`${name}.sig`);
