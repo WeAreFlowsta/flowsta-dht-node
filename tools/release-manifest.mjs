@@ -19,7 +19,7 @@
 //
 // Usage:
 //   node tools/release-manifest.mjs <app> <tag> [--rollout 100] [--from <version>]
-//        [--changes-line] [--sequence N] [--dry-run] [--no-upload] [--vault URL]
+//        [--changes-line] [--sequence N] [--allow-older] [--dry-run] [--no-upload] [--vault URL]
 //   <app>: vault, proofpoll or yoai.
 //   --dry-run: print the manifest and its statement, sign nothing.
 //
@@ -84,7 +84,7 @@ const flag = (name) => args.includes(`--${name}`);
 const [appName, tag] = args;
 const cfg = APPS[appName];
 if (!cfg || !tag || tag.startsWith('--')) {
-  console.error(`usage: release-manifest.mjs <${Object.keys(APPS).join('|')}> <tag> [--rollout 100] [--from <version>] [--changes-line] [--sequence N] [--dry-run] [--no-upload] [--vault URL]`);
+  console.error(`usage: release-manifest.mjs <${Object.keys(APPS).join('|')}> <tag> [--rollout 100] [--from <version>] [--changes-line] [--sequence N] [--allow-older] [--dry-run] [--no-upload] [--vault URL]`);
   process.exit(2);
 }
 if (!tag.startsWith(cfg.tagPrefix)) throw new Error(`${appName} tags start with ${cfg.tagPrefix}`);
@@ -270,6 +270,34 @@ const lastSignedPath = path.join(configDir, 'release-manifests', `${APP}-${chann
 const lastSigned = fs.existsSync(lastSignedPath) ? JSON.parse(fs.readFileSync(lastSignedPath, 'utf8')).sequence : 0;
 const channelManifestUrl = channelUrl(CHANNEL_TAG, 'release-manifest.json');
 const published = await fetch(channelManifestUrl).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+// ---- The version must sort above the one the channel holds, by the rule the
+// installed updater uses (semver). A pre-release part that mixes letters and
+// digits is compared as text: "beta10" sorts BELOW "beta9", so no install on
+// beta9 would ever take it (Vault 1.8.0-beta10). Write the number as its own
+// part ("beta.10", "rc.1").
+function semverCompare(a, b) {
+  const split = (v) => { const [core, ...pre] = v.split('+')[0].split('-'); return [core.split('.').map(Number), pre.length ? pre.join('-').split('.') : []]; };
+  const [ca, pa] = split(a); const [cb, pb] = split(b);
+  for (let i = 0; i < 3; i++) if ((ca[i] || 0) !== (cb[i] || 0)) return (ca[i] || 0) < (cb[i] || 0) ? -1 : 1;
+  if (!pa.length || !pb.length) return pa.length === pb.length ? 0 : pa.length ? -1 : 1;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if (pa[i] === undefined) return -1;
+    if (pb[i] === undefined) return 1;
+    const na = /^\d+$/.test(pa[i]); const nb = /^\d+$/.test(pb[i]);
+    if (na && nb) { if (Number(pa[i]) !== Number(pb[i])) return Number(pa[i]) < Number(pb[i]) ? -1 : 1; continue; }
+    if (na !== nb) return na ? -1 : 1;
+    if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  }
+  return 0;
+}
+for (const [x, y, want] of [['1.8.0-beta10', '1.8.0-beta9', -1], ['1.8.0-beta.10', '1.8.0-beta.9', 1], ['1.8.0-rc.1', '1.8.0-beta9', 1], ['1.8.0', '1.8.0-rc.1', 1], ['1.8.1', '1.8.0', 1], ['0.6.0-beta.9', '0.6.0-beta.9', 0]]) {
+  if (semverCompare(x, y) !== want) throw new Error(`the version comparison is wrong for ${x} and ${y}`);
+}
+const channelVersion = published?.app === APP && published?.channel === channel ? published.version : null;
+if (channelVersion && channelVersion !== version && semverCompare(version, channelVersion) <= 0 && !args.includes('--allow-older')) {
+  throw new Error(`${version} does not sort above ${channelVersion}, which the ${channel} channel holds: an install on ${channelVersion} would never take it. A pre-release number must be a part of its own ("beta.10", not "beta10"). Pass --allow-older only to move a channel back on purpose.`);
+}
+
 let sequence = Number(opt('sequence', 0));
 if (!sequence) {
   sequence = Math.max(lastSigned, published?.app === APP && published?.channel === channel ? published.sequence : 0) + 1;
