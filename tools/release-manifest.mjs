@@ -356,7 +356,14 @@ const toolDid = (() => {
   return `did:flowsta:${encodeHashToBase64(hashFrom32AndType(raw, HoloHashType.Agent))}`;
 })();
 const appKey = toolDid.replace(/^did:flowsta:/, '');
-const linked = await fetch(`${VAULT}/link-status?app_agent_pub_key=${encodeURIComponent(appKey)}`, { headers: { Origin: ORIGIN } }).then((r) => r.json()).catch(() => ({ linked: false }));
+// The tool's client id, kept beside its key once known: a Vault that holds
+// links to several apps from this origin (another project's release tool on
+// the same computer) refuses a request that does not say which app it is.
+const clientIdFile = path.join(path.dirname(toolKeyFile), 'release-tool.client-id');
+const knownClientId = process.env.FLOWSTA_RELEASE_CLIENT_ID || (fs.existsSync(clientIdFile) ? fs.readFileSync(clientIdFile, 'utf8').trim() : '');
+if (process.env.FLOWSTA_RELEASE_CLIENT_ID) fs.writeFileSync(clientIdFile, process.env.FLOWSTA_RELEASE_CLIENT_ID + '\n', { mode: 0o600 });
+const named = knownClientId ? { client_id: knownClientId } : {};
+const linked = await fetch(`${VAULT}/link-status?app_agent_pub_key=${encodeURIComponent(appKey)}${knownClientId ? `&client_id=${encodeURIComponent(knownClientId)}` : ''}`, { headers: { Origin: ORIGIN } }).then((r) => r.json()).catch(() => ({ linked: false }));
 if (!linked.linked) {
   const clientId = process.env.FLOWSTA_RELEASE_CLIENT_ID;
   if (!clientId) throw new Error('first run: set FLOWSTA_RELEASE_CLIENT_ID (the "Flowsta Release Tool" app at dev.flowsta.com)');
@@ -365,7 +372,8 @@ if (!linked.linked) {
   if (!r.ok) throw new Error(`link-identity refused: ${r.status} ${await r.text()}`);
 }
 console.log('asking the Vault to sign (approve it there within ten minutes; check the version, channel and hashes against the lines above)...');
-const signRes = await postToVault(`${VAULT}/sign-release-manifest`, ORIGIN, { manifest });
+const signRes = await postToVault(`${VAULT}/sign-release-manifest`, ORIGIN, { manifest, ...named });
+if (signRes.status === 403 && !knownClientId) { const t = await signRes.clone().text(); if (t.includes('app_ambiguous')) throw new Error('the Vault holds several apps from this origin: run once with FLOWSTA_RELEASE_CLIENT_ID set to the "Flowsta Release Tool" client id (dev.flowsta.com); it is remembered after that'); }
 if (!signRes.ok) throw new Error(`sign refused: ${signRes.status} ${await signRes.text()}`);
 const signed = await signRes.json();
 if (signed.statement !== statement) throw new Error(`the Vault signed a different statement:\n  vault ${signed.statement}\n  here  ${statement}`);
