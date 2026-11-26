@@ -42,6 +42,7 @@ Image digests (2026-10-24, Cloud Build):
 | `flowsta-edgenode` | hc0.7.1 | `sha256:dd17ec0f89b7e91a66875036d7c0d65bee3ca67576d8018ce1db81f630e3ec0f` |
 | `flowsta-edgenode` | hc0.7.1-flowsta.4 (2026-11-11) | `sha256:1f0604bc2e26a6dd6f842c46334c0b9ebd26172a4e3b31dee6caeb6d49e4ad5b` |
 | `flowsta-dht-node` (agent) | 2.0.13 (2026-11-11) | `sha256:1ec09ee1eb2766d12f664c1923ca4264133a421636f748c96f13d3b6ecd23129` |
+| `flowsta-dht-node` (agent) | 2.0.14 (2026-11-26) | `sha256:de8206032fa51376a9c97b084fa18481609b1fdb8da82c87c1980f473026ce4c` |
 
 **Channels and who signs them (2026-10-24).** `stable`: Team Flowsta's identity in the Vault, nothing else. `staging` and `proofpoll`: a local key on the release machine, trusted by the staging API (`NODE_MANIFEST_SIGNER_DID`) and by each node's `MANIFEST_SIGNER_DID`, until the Vault signs manifests itself; both channels are published through the staging API meanwhile. ProofPoll bundles come from the ProofPoll repository at its release tag (sha256-verified by the agent before install).
 
