@@ -14,6 +14,16 @@ Rules the agent enforces (see `agent/lib/manifest.mjs`): images pinned by digest
 "memory_restart": { "generations": ["holochain-0.7"], "share": 0.45, "urgent_share": 0.6, "slots": { "europe-dht": "05:20", "singapore-dht": "05:50" } }
 ```
 
+A line can have its own thresholds (agent 2.0.14): `"lines": { "holochain-0.6": { "share": 0.2, "urgent_share": 0.24 } }`, for a line named in `generations` whose conductor is much smaller than the other's. A line's `share` may be as low as 0.05; its `urgent_share`, or the block's when it has none, must be above it. From 2.0.14 the agent restarts one conductor per check, so two lines due in the same slot go five minutes apart. Older agents ignore `lines` and use the block's `share` for every line in `generations`.
+
+**`memory_limits` (agent 2.0.14; optional).** A memory ceiling for each conductor container, per node label and line: `memory_mb` is the container's memory, `memory_swap_mb` its memory and swap together (Docker's two figures; at least `memory_mb`, which is at least 256). The agent sets them when it creates a conductor, and on a conductor that already exists, running or stopped, without restarting it; it checks every five minutes. The ceiling is the backstop behind `memory_restart`, so the agent keeps two rules (`agent/lib/limits.mjs`): it does not set a ceiling whose memory-and-swap figure is not above the point where the size restart acts at once on that VM (`urgent_share`, else `share`, times the VM's memory), and it does not lower a ceiling onto a running conductor that already holds more than nine tenths of it; that one waits for the conductor's next restart. Each refusal is logged once and carried in the node's report (`conductor.memory_limit_verdict`). A node or line the block does not name keeps what it has: `CONDUCTOR_MEMORY` at creation, or a ceiling set by hand. The agent never removes a ceiling. Older agents ignore the block. Example:
+
+```json
+"memory_limits": {
+  "europe-dht-2": { "holochain-0.7": { "memory_mb": 2600, "memory_swap_mb": 3000 }, "holochain-0.6": { "memory_mb": 1000, "memory_swap_mb": 1400 } }
+}
+```
+
 **`carrier` (agent 2.0.12; optional; the `proofpoll` channel).** The agent runs the ProofPoll carrier (`proofpoll-carrier`, in an image built with `_CARRIER_URL` and `_CARRIER_SHA256`; `agent/lib/carrier.mjs`): one pass that carries ProofPoll's public records from DNA v1.3 (the `v06` generation's conductor) and v1.4 (`v07`) to v1.5 on `v07`, at most once in `every_hours`. A pass starts only when both conductors have run for 15 minutes, the VM has `min_free_mb` + 200 MB free, and nothing else changed the node in that tick (otherwise it tries again in 10 minutes); a pass running for 2 hours is stopped. After a pass that wrote, the agent restarts the `v07` conductor (`restart_after_write`, default true) to give back the memory the calls kept. `dry_run` counts only. The signing credentials are kept in `<STATE_DIR>/proofpoll-carrier.json` (owner-readable only), so the node's chains get one grant per cell, not one per pass. No pass after `until`. Older agents ignore the block. Example:
 
 ```json

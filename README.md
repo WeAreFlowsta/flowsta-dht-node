@@ -236,7 +236,7 @@ Create a `.env` file in the repo root:
 | `REPORT_INTERVAL` | No | `600` (10 min) | Seconds between health reports |
 | `REPORT_DISABLED` | No | `0` | Set `1` to send no health reports |
 | `BOOTSTRAP_AUTH_MATERIAL`, `RELAY_AUTH_MATERIAL` | No | community client id | Bootstrap/relay auth material in the rendered conductor configs |
-| `CONDUCTOR_MEMORY` | No | none | Memory cap per conductor container, e.g. `1400m`; `CONDUCTOR_MEMORY_SWAP` the memory+swap cap (default twice) |
+| `CONDUCTOR_MEMORY` | No | none | Memory cap per conductor container, e.g. `1400m`; `CONDUCTOR_MEMORY_SWAP` the memory+swap cap (default twice). Used when a conductor is created, where the manifest's `memory_limits` does not name this node and line (`manifest/README.md`) |
 | `CONDUCTOR_ENV` | No | none | glibc malloc settings for the conductor containers, `;`-separated (`GLIBC_TUNABLES`, `MALLOC_ARENA_MAX`, `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TRIM_THRESHOLD_`, `MALLOC_TOP_PAD_` only). Counts in the conductor's config hash: changing it replaces the conductor in the window |
 | `CONDUCTOR_ENV_FOR` | No | `holochain-0.7` | The generations `CONDUCTOR_ENV` applies to, comma-separated |
 | `CONDUCTOR_ALLOWED_ORIGINS` | No | `flowsta-agent,flowsta-auth-api` | Origins the conductor's admin interface answers (comma-separated); add your own tools here |

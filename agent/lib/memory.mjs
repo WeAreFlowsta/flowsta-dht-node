@@ -12,8 +12,15 @@
  *     "slots": { "europe-dht": "05:20" }, each node's own time (node-local, like
  *                                         UPDATE_WINDOW), so nodes restart one at a time
  *     "urgent_share": 0.6,                optional: above this, restart at once
- *     "every_hours": 24                   optional: at most this often (default 24, min 6)
+ *     "every_hours": 24,                  optional: at most this often (default 24, min 6)
+ *     "lines": {                          optional: a line's own thresholds (agent 2.0.14)
+ *       "holochain-0.6": { "share": 0.2, "urgent_share": 0.24 }
+ *     }
  *   }
+ *
+ * One conductor per check: when two lines of a node are due in the same slot
+ * the second waits for the next check, five minutes on, so the node is never
+ * without both at once.
  *
  * A node without a slot never restarts for memory (except above
  * urgent_share), so the fleet opts in node by node. Rather than a container
@@ -45,7 +52,29 @@ export function memoryPolicyProblem(p) {
     if (!LABEL.test(label)) return `bad memory_restart slot label ${label}`;
     if (typeof at !== 'string' || !HHMM.test(at)) return `bad memory_restart slot time for ${label}`;
   }
+  if (p.lines !== undefined) {
+    if (!p.lines || typeof p.lines !== 'object' || Array.isArray(p.lines)) return 'bad memory_restart lines';
+    for (const [gen, l] of Object.entries(p.lines)) {
+      if (!p.generations.includes(gen)) return `memory_restart lines names ${gen}, which is not in generations`;
+      if (!l || typeof l !== 'object') return `bad memory_restart lines for ${gen}`;
+      if (typeof l.share !== 'number' || !(l.share >= 0.05 && l.share <= 0.9)) return `memory_restart lines share for ${gen} must be between 0.05 and 0.9`;
+      const urgent = l.urgent_share ?? p.urgent_share;
+      if (l.urgent_share !== undefined && typeof l.urgent_share !== 'number') return `bad memory_restart lines urgent_share for ${gen}`;
+      if (urgent !== undefined && !(urgent > l.share && urgent <= 0.95)) return `memory_restart urgent_share for ${gen} must be above its share and at most 0.95`;
+    }
+  }
   return null;
+}
+
+/**
+ * The thresholds the policy gives a line: its own (`lines`) or the block's.
+ * Null when there is no policy or it does not name the line.
+ * @returns {{ share: number, urgent: number | undefined } | null}
+ */
+export function thresholdsFor(policy, generation) {
+  if (!policy || !Array.isArray(policy.generations) || !policy.generations.includes(generation)) return null;
+  const own = policy.lines?.[generation];
+  return { share: own?.share ?? policy.share, urgent: own?.urgent_share ?? policy.urgent_share };
 }
 
 /** "05:20" → minutes after midnight. */
@@ -71,17 +100,18 @@ export function inSlot(date, hhmm) {
 export function memoryVerdict({ usedBytes, totalBytes }, { policy, label, generation, now, startedAt, lastRestartAt = null }) {
   const share = usedBytes > 0 && totalBytes > 0 ? usedBytes / totalBytes : null;
   const no = (reason) => ({ restart: false, reason, share });
-  if (!policy || !policy.generations.includes(generation)) return no('no memory policy for this line');
+  const th = thresholdsFor(policy, generation);
+  if (!th) return no('no memory policy for this line');
   if (share === null) return no('memory not measured');
   const pct = (x) => `${Math.round(x * 100)} %`;
-  if (share < policy.share) return no(`${pct(share)} of the VM's memory, under ${pct(policy.share)}`);
+  if (share < th.share) return no(`${pct(share)} of the VM's memory, under ${pct(th.share)}`);
   const t = now.getTime();
   if (t - startedAt < AFTER_START_MS) return no(`${pct(share)}, but started less than 6 hours ago`);
   const every = (policy.every_hours || 24) * HOUR;
   if (lastRestartAt && t - lastRestartAt < every) return no(`${pct(share)}, but restarted for its size less than ${policy.every_hours || 24} hours ago`);
-  if (policy.urgent_share && share >= policy.urgent_share) return { restart: true, reason: `${pct(share)} of the VM's memory, over the urgent ${pct(policy.urgent_share)}`, share };
+  if (th.urgent && share >= th.urgent) return { restart: true, reason: `${pct(share)} of the VM's memory, over the urgent ${pct(th.urgent)}`, share };
   const slot = policy.slots[label];
-  if (!slot) return no(`${pct(share)}, over ${pct(policy.share)}, but this node has no restart slot`);
-  if (!inSlot(now, slot)) return no(`${pct(share)}, over ${pct(policy.share)}; waits for its slot at ${slot}`);
-  return { restart: true, reason: `${pct(share)} of the VM's memory, over ${pct(policy.share)}, in its slot at ${slot}`, share };
+  if (!slot) return no(`${pct(share)}, over ${pct(th.share)}, but this node has no restart slot`);
+  if (!inSlot(now, slot)) return no(`${pct(share)}, over ${pct(th.share)}; waits for its slot at ${slot}`);
+  return { restart: true, reason: `${pct(share)} of the VM's memory, over ${pct(th.share)}, in its slot at ${slot}`, share };
 }
