@@ -92,7 +92,7 @@
     }
   ],
   "agent": {
-    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:1ec09ee1eb2766d12f664c1923ca4264133a421636f748c96f13d3b6ecd23129"
+    "image": "us-docker.pkg.dev/flowsta-475001/public/flowsta-dht-node@sha256:de8206032fa51376a9c97b084fa18481609b1fdb8da82c87c1980f473026ce4c"
   },
   "advisories": [
     {
@@ -131,6 +131,12 @@
       "action": "notice",
       "generation": "holochain-0.7",
       "text": "Agent 2.0.13 and a new 0.7 conductor image: Holochain 0.7.1 as built by WeAreFlowsta/holochain-build (flowsta.4, six patches; nothing another conductor can see changes). It answers a gossip offer of any size, so its config no longer caps an exchange at 1 MiB and long histories reach other conductors. The conductor restarts once in the node's window."
+    },
+    {
+      "id": "agent-2-0-14",
+      "severity": "routine",
+      "action": "notice",
+      "text": "Agent 2.0.14: each conductor container carries the memory ceiling this manifest names for its node and line, set without a restart and kept when a conductor is created again. A ceiling is never set at or under the point where the size restart acts, and never lowered onto a running conductor that is already near it. Nodes this manifest does not name are unchanged."
     }
   ],
   "memory_restart": {
@@ -143,6 +149,48 @@
       "europe-dht": "05:20",
       "singapore-dht": "05:50",
       "europe-dht-2": "04:50"
+    }
+  },
+  "memory_limits": {
+    "europe-dht": {
+      "holochain-0.7": {
+        "memory_mb": 2600,
+        "memory_swap_mb": 3000
+      },
+      "holochain-0.6": {
+        "memory_mb": 1000,
+        "memory_swap_mb": 1400
+      }
+    },
+    "europe-dht-2": {
+      "holochain-0.7": {
+        "memory_mb": 2600,
+        "memory_swap_mb": 3000
+      },
+      "holochain-0.6": {
+        "memory_mb": 1000,
+        "memory_swap_mb": 1400
+      }
+    },
+    "singapore-dht": {
+      "holochain-0.7": {
+        "memory_mb": 2600,
+        "memory_swap_mb": 3000
+      },
+      "holochain-0.6": {
+        "memory_mb": 1000,
+        "memory_swap_mb": 1400
+      }
+    },
+    "node1": {
+      "holochain-0.7": {
+        "memory_mb": 5000,
+        "memory_swap_mb": 6000
+      },
+      "holochain-0.6": {
+        "memory_mb": 2000,
+        "memory_swap_mb": 3000
+      }
     }
   }
 }
