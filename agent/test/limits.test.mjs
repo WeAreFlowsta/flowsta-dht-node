@@ -5,7 +5,7 @@ import { conductorContainerSpec } from '../lib/docker.mjs';
 
 const MB = 1024 * 1024;
 const IDS = new Set(['holochain-0.6', 'holochain-0.7']);
-// Europe and Singapore production: a 4 GB VM (3913 MB seen by the kernel), the ceilings set by hand on 2026-11-15.
+// A 4 GB VM (3913 MB seen by the kernel) and ceilings sized for it.
 const VM = 3913 * MB;
 const STABLE = { generations: ['holochain-0.7'], share: 0.45, urgent_share: 0.6, slots: { 'europe-dht-2': '04:50' } };
 const LIMITS = { 'europe-dht-2': { 'holochain-0.7': { memory_mb: 2600, memory_swap_mb: 3000 }, 'holochain-0.6': { memory_mb: 1000, memory_swap_mb: 1400 } } };

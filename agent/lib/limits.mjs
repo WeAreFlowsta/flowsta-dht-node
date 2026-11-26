@@ -4,7 +4,7 @@
  * A 0.7.1 conductor grows until something stops it. The clean stop is the
  * size restart (lib/memory.mjs). The ceiling is the backstop for when that
  * does not act in time: without one a grown conductor takes the whole VM
- * down with it (Iowa 2026-11-07, Europe staging 2026-11-14).
+ * down with it.
  *
  *   "memory_limits": {
  *     "europe-dht-2": {                      per node label
