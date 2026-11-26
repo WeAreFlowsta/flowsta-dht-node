@@ -14,6 +14,7 @@
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { canonicalJson } from './canonical.mjs';
 import { memoryPolicyProblem } from './memory.mjs';
+import { memoryLimitsProblem } from './limits.mjs';
 import { carrierPolicyProblem } from './carrier.mjs';
 
 export const STATEMENT_PREFIX = 'flowsta-node-manifest:v1:';
@@ -87,6 +88,8 @@ export function validateShape(m) {
   if (!m.agent || typeof m.agent.image !== 'string' || !DIGEST_IMAGE.test(m.agent.image)) return 'agent image must be pinned by digest';
   const memory = memoryPolicyProblem(m.memory_restart);
   if (memory) return memory;
+  const limits = memoryLimitsProblem(m.memory_limits, ids);
+  if (limits) return limits;
   const carrier = carrierPolicyProblem(m.carrier, ids);
   if (carrier) return carrier;
   if (m.advisories !== undefined) {

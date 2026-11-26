@@ -16,7 +16,9 @@
  * (lib/registration.mjs), at most once in 6 hours; and, where the manifest's
  * `memory_restart` gives this node a slot, a conductor holding more than its
  * share of the VM's memory is restarted in that slot, at most once a day
- * (lib/memory.mjs). Once a day in the window it removes old images of the
+ * (lib/memory.mjs). Where the manifest's `memory_limits` names this node, each
+ * conductor container carries that memory ceiling, set at creation and on a
+ * container that already exists (lib/limits.mjs). Once a day in the window it removes old images of the
  * repositories the manifest names (lib/prune.mjs). Where the manifest has a
  * `carrier` block (the ProofPoll node), it runs the ProofPoll carrier on its
  * schedule and restarts the 0.7 conductor after a pass that wrote
@@ -39,7 +41,8 @@
  *   CONDUCTOR_DATA_ROOT       data_root_path inside the conductor container; default: carried over from the
  *                             adopted conductor, else /data/holochain. Never change it for a running generation.
  *   CONDUCTOR_LAIR_ROOT       lair_root (default <CONDUCTOR_DATA_ROOT>/ks)
- *   CONDUCTOR_MEMORY          memory cap for each conductor container, e.g. 1400m (default none);
+ *   CONDUCTOR_MEMORY          memory cap for each conductor container, e.g. 1400m (default none), used at
+ *                             creation where the manifest's memory_limits does not name this node and line;
  *   CONDUCTOR_MEMORY_SWAP     memory+swap cap, e.g. 2400m (default twice the memory cap)
  *   CONDUCTOR_ENV             glibc malloc settings for the conductors, `;`-separated (lib/conductor-env.mjs)
  *   CONDUCTOR_ENV_FOR         the generations CONDUCTOR_ENV applies to (default holochain-0.7)
@@ -71,6 +74,7 @@ import { verifyConductor, connectAdmin, isRunning } from './lib/verify.mjs';
 import { probeConductor } from '../updater/network-probe.mjs';
 import { putErrors, registrationVerdict } from './lib/registration.mjs';
 import { memoryVerdict } from './lib/memory.mjs';
+import { limitFor, limitVerdict } from './lib/limits.mjs';
 import { readHost, containerMemory, parseSwapCurrent } from './lib/host.mjs';
 import { prunableImages } from './lib/prune.mjs';
 import { parseConductorEnv, configShaOf } from './lib/conductor-env.mjs';
@@ -267,7 +271,7 @@ function desiredFrom(manifest, auth) {
     generations: manifest.generations.map((g) => {
       const config = renderConductorConfig(g, { ...auth, allowedOrigins: cfg.allowedOrigins });
       const conductorEnv = cfg.conductorEnvFor.includes(g.id) ? cfg.conductorEnv : [];
-      return { id: g.id, state: g.state, image: g.conductor.image, adminPort: g.conductor.admin_port, config, configSha: configShaOf(config, conductorEnv), env: conductorEnv, adopts: g.adopts_legacy_conductor === true, dnas: g.dnas, holochain: g.holochain };
+      return { id: g.id, state: g.state, image: g.conductor.image, adminPort: g.conductor.admin_port, config, configSha: configShaOf(config, conductorEnv), env: conductorEnv, adopts: g.adopts_legacy_conductor === true, dnas: g.dnas, holochain: g.holochain, limit: limitFor(manifest, cfg.label, g.id) };
     }),
   };
 }
@@ -279,7 +283,12 @@ async function createConductor(gen, { dataVolume, dataBind }, sequence) {
   await docker.pullImage(gen.image);
   if (!dataBind) await docker.createVolume(dataVolume, { [MANAGED_LABEL]: 'agent', [GENERATION_LABEL]: gen.id }).catch((e) => { if (e.status !== 409) throw e; });
   const labels = { [MANAGED_LABEL]: 'agent', [GENERATION_LABEL]: gen.id, [CONFIG_LABEL]: gen.configSha, [IMAGE_LABEL]: gen.image, [SEQUENCE_LABEL]: String(sequence) };
-  const created = await docker.createContainer(name, conductorContainerSpec({ image: gen.image, generation: gen.id, dataVolume, dataBind, labels, env: gen.env || [], memoryBytes: cfg.memoryBytes, memorySwapBytes: cfg.memorySwapBytes }));
+  // The manifest's ceiling for this node and line when it has one that sits
+  // above the size restart (lib/limits.mjs), else the node's own CONDUCTOR_MEMORY.
+  const ceiling = limitVerdict(gen.limit, { have: null, running: false, totalBytes: vmMemory(), policy: state.manifest?.memory_restart, generation: gen.id });
+  if (gen.limit && !ceiling.apply) log(`${gen.id}: ${ceiling.reason}`);
+  const memory = ceiling.apply ? gen.limit : { memoryBytes: cfg.memoryBytes, memorySwapBytes: cfg.memorySwapBytes };
+  const created = await docker.createContainer(name, conductorContainerSpec({ image: gen.image, generation: gen.id, dataVolume, dataBind, labels, env: gen.env || [], memoryBytes: memory.memoryBytes, memorySwapBytes: memory.memorySwapBytes }));
   try {
     await docker.putArchive(created.Id, TEMPLATE_DIR, tarOfFile(TEMPLATE_FILE, gen.config));
     await docker.startContainer(created.Id);
@@ -610,8 +619,7 @@ let lastMemoryCheckAt = 0;
 async function memoryWatch(manifest, desired, observed) {
   if (Date.now() - lastMemoryCheckAt < 5 * 60 * 1000) return;
   lastMemoryCheckAt = Date.now();
-  const host = readHost(cfg.stateDir);
-  const totalBytes = host.mem_total || os.totalmem();
+  const totalBytes = vmMemory();
   for (const gen of desired.generations) {
     if (gen.state === 'retired') continue;
     const c = observed.managed.find((x) => x.labels[GENERATION_LABEL] === gen.id && x.running);
@@ -640,8 +648,59 @@ async function memoryWatch(manifest, desired, observed) {
       g.lastMemoryRestart = new Date().toISOString();
       remember(state, { event: 'memory_restart', generation: gen.id, reason: v.reason, used_bytes: usedBytes });
       persist();
+      // One conductor per check: another line of this node that is due waits
+      // for the next check, so the node is never without both at once.
+      break;
     } catch (e) {
       log(`${gen.id}: memory check skipped (${e.message})`);
+    }
+  }
+}
+
+/** The VM's memory in bytes. */
+function vmMemory() {
+  return readHost(cfg.stateDir).mem_total || os.totalmem();
+}
+
+// ── conductor memory ceilings (any time, no restart; lib/limits.mjs) ────────
+
+let lastLimitCheckAt = 0;
+
+async function limitsWatch(manifest, desired, observed) {
+  if (Date.now() - lastLimitCheckAt < 5 * 60 * 1000) return;
+  lastLimitCheckAt = Date.now();
+  const totalBytes = vmMemory();
+  for (const gen of desired.generations) {
+    if (gen.state === 'retired' || !gen.limit) continue;
+    const c = observed.managed.find((x) => x.labels[GENERATION_LABEL] === gen.id);
+    if (!c) continue;
+    try {
+      const info = await docker.inspectContainer(c.id);
+      if (!info) continue;
+      const running = info.State?.Running === true;
+      const have = { memoryBytes: info.HostConfig?.Memory || 0, memorySwapBytes: info.HostConfig?.MemorySwap || 0 };
+      let residentBytes = null; let swapBytes = null;
+      if (running) {
+        const [stats, swap] = await Promise.all([docker.containerStats(c.id), containerSwap(c.id)]);
+        residentBytes = containerMemory(stats);
+        swapBytes = swap;
+      }
+      const v = limitVerdict(gen.limit, { have, running, residentBytes, swapBytes, totalBytes, policy: manifest.memory_restart, generation: gen.id });
+      const g = (state.generations[gen.id] ||= {});
+      const before = g.limit?.kind;
+      g.limit = { kind: v.kind, verdict: v.reason, at: new Date().toISOString() };
+      if (!v.apply) {
+        // Said once per change of case, not every five minutes.
+        if (v.kind !== 'in-place' && v.kind !== before) log(`${gen.id}: memory ceiling: ${v.reason}`);
+        continue;
+      }
+      if (cfg.dryRun) { log(`DRY RUN: would set on ${gen.id}: ${v.reason}`); continue; }
+      await docker.updateContainer(c.id, { Memory: gen.limit.memoryBytes, MemorySwap: gen.limit.memorySwapBytes });
+      log(`${gen.id}: memory ${v.reason} set on the ${running ? 'running' : 'stopped'} conductor (was ${have.memoryBytes ? `${Math.round(have.memoryBytes / 1048576)} MB, ${Math.round(have.memorySwapBytes / 1048576)} MB with swap` : 'none'}); no restart`);
+      remember(state, { event: 'memory_limit', generation: gen.id, memory_bytes: gen.limit.memoryBytes, memory_swap_bytes: gen.limit.memorySwapBytes, was_bytes: have.memoryBytes || null });
+      persist();
+    } catch (e) {
+      log(`${gen.id}: memory ceiling check skipped (${e.message})`);
     }
   }
 }
@@ -800,6 +859,10 @@ async function report(desired, observed) {
         last_registration_restart: g.lastRegistrationRestart || null,
         last_memory_restart: g.lastMemoryRestart || null,
         memory_verdict: g.memory?.verdict || null,
+        // The container's ceiling as Docker holds it (agent 2.0.14); null = none.
+        memory_limit_bytes: info?.HostConfig?.Memory || null,
+        memory_limit_swap_bytes: info?.HostConfig?.MemorySwap || null,
+        memory_limit_verdict: g.limit?.verdict || null,
       };
       const body = { ...base, host: readHost(cfg.stateDir), conductor, generation: gen.id, holochain: gen.holochain, conductor_digest: (c.image.split('@')[1] || null), agent_digest: (observed.agentImage?.split('@')[1] || null), manifest_sequence: state.manifest_sequence, manifest_issued_at: state.manifest?.issued_at || null, channel: cfg.channel, signer: cfg.signerDid, last_change: g.lastChange || null, last_rollback: g.lastRollback || null, advisories_applied: state.advisories_applied.slice(-20) };
       const headers = { 'Content-Type': 'application/json' };
@@ -851,6 +914,7 @@ async function tick() {
     await upkeep(desired, after);
     await registrationWatch(desired, after);
     await memoryWatch(manifest, desired, after);
+    await limitsWatch(manifest, desired, after);
     await carrierWatch(manifest, desired, after, results.length > 0);
     if (isWindow && !waiting.length && retiredPrevious) await pruneImages(manifest);
     if (Date.now() - lastReportAt >= cfg.reportMs) { await report(desired, after); lastReportAt = Date.now(); }

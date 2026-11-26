@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { memoryVerdict, memoryPolicyProblem, inSlot } from '../lib/memory.mjs';
+import { memoryVerdict, memoryPolicyProblem, inSlot, thresholdsFor } from '../lib/memory.mjs';
 
 const GB = 1024 ** 3;
 const HOUR = 3_600_000;
@@ -72,4 +72,39 @@ test('policy shape', () => {
   assert.match(memoryPolicyProblem({ ...POLICY, slots: { 'Europe DHT': '05:20' } }), /slot label/);
   assert.match(memoryPolicyProblem({ ...POLICY, slots: { 'europe-dht': '5:20' } }), /slot time/);
   assert.match(memoryPolicyProblem({ ...POLICY, generations: [] }), /generations/);
+});
+
+// ── a line's own thresholds (agent 2.0.14) ───────────────────────────────────
+
+const TWO_LINES = { generations: ['holochain-0.7', 'holochain-0.6'], share: 0.45, urgent_share: 0.6, slots: { 'europe-dht': '05:20' }, lines: { 'holochain-0.6': { share: 0.2, urgent_share: 0.24 } } };
+
+test('a line with its own share: restarted at that share, not the block\'s', () => {
+  const v = memoryVerdict({ usedBytes: 0.85 * GB, totalBytes: 3.82 * GB }, { ...base, policy: TWO_LINES, generation: 'holochain-0.6', now: at(5, 25) }); // 22 %
+  assert.equal(v.restart, true);
+  assert.match(v.reason, /^22 % of the VM's memory, over 20 %, in its slot at 05:20$/);
+  // The same size on the 0.7 line is far under its 45 %.
+  assert.equal(memoryVerdict({ usedBytes: 0.85 * GB, totalBytes: 3.82 * GB }, { ...base, policy: TWO_LINES, now: at(5, 25) }).restart, false);
+});
+
+test('a line with its own urgent share: at once above it, outside the slot', () => {
+  const v = memoryVerdict({ usedBytes: 1.0 * GB, totalBytes: 3.82 * GB }, { ...base, policy: TWO_LINES, generation: 'holochain-0.6', now: at(14, 0) }); // 26 %
+  assert.equal(v.restart, true);
+  assert.match(v.reason, /over the urgent 24 %$/);
+});
+
+test('thresholdsFor: the line\'s own, else the block\'s, else none', () => {
+  assert.deepEqual(thresholdsFor(TWO_LINES, 'holochain-0.6'), { share: 0.2, urgent: 0.24 });
+  assert.deepEqual(thresholdsFor(TWO_LINES, 'holochain-0.7'), { share: 0.45, urgent: 0.6 });
+  assert.equal(thresholdsFor(POLICY, 'holochain-0.6'), null);
+  assert.equal(thresholdsFor(undefined, 'holochain-0.7'), null);
+});
+
+test('shape: lines are checked', () => {
+  assert.equal(memoryPolicyProblem(TWO_LINES), null);
+  assert.match(memoryPolicyProblem({ ...TWO_LINES, lines: { 'holochain-0.5': { share: 0.2 } } }), /not in generations/);
+  assert.match(memoryPolicyProblem({ ...TWO_LINES, lines: { 'holochain-0.6': { share: 0.01 } } }), /between 0.05 and 0.9/);
+  assert.match(memoryPolicyProblem({ ...TWO_LINES, lines: { 'holochain-0.6': { share: 0.3, urgent_share: 0.25 } } }), /above its share/);
+  // A line's share above the block's urgent share, with no urgent share of its own, would never restart in its slot.
+  assert.match(memoryPolicyProblem({ ...TWO_LINES, lines: { 'holochain-0.6': { share: 0.7 } } }), /above its share/);
+  assert.match(memoryPolicyProblem({ ...TWO_LINES, lines: [] }), /bad memory_restart lines/);
 });

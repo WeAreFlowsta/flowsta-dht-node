@@ -143,3 +143,11 @@ test('shape: a carrier block is checked against the generations; one without it 
   assert.match(validateShape({ ...base, carrier: { lines, every_hours: 0 }, signature: sig }), /every_hours/);
   assert.match(validateShape({ ...base, carrier: { lines, every_hours: 6, until: 'soon' }, signature: sig }), /until/);
 });
+
+test('shape: a memory_limits block is checked; its lines must be generations of this manifest', () => {
+  const sig = { signer: 'x', sig: 'y' };
+  const good = { 'europe-dht-2': { 'holochain-0.7': { memory_mb: 2600, memory_swap_mb: 3000 }, 'holochain-0.6': { memory_mb: 1000, memory_swap_mb: 1400 } } };
+  assert.equal(validateShape({ ...sampleManifest(), memory_limits: good, signature: sig }), null);
+  assert.match(validateShape({ ...sampleManifest(), memory_limits: { 'europe-dht-2': { 'holochain-0.7': { memory_mb: 1, memory_swap_mb: 1 } } }, signature: sig }), /memory_mb/);
+  assert.match(validateShape({ ...sampleManifest(), memory_limits: { 'europe-dht-2': { 'holochain-0.8': { memory_mb: 2600, memory_swap_mb: 3000 } } }, signature: sig }), /unknown generation/);
+});
